@@ -16,3 +16,5 @@ __*/
 !__init__.py
 TODO
 db/
+dataset/
+.venv/
