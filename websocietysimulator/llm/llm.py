@@ -113,9 +113,14 @@ class OpenAILLM(LLMBase):
         self.client = OpenAI(api_key=api_key)
         self.embedding_model = OpenAIEmbeddings(api_key=api_key)
         
+    @retry(
+        retry=retry_if_exception_type(Exception),
+        wait=wait_exponential(multiplier=1, min=10, max=300),  # Wait time starts at 10 seconds, exponential backoff, max 300 seconds
+        stop=stop_after_attempt(10)  # Retry up to 10 times
+    )
     def __call__(self, messages: List[Dict[str, str]], model: Optional[str] = None, temperature: float = 0.0, max_tokens: int = 500, stop_strs: Optional[List[str]] = None, n: int = 1) -> Union[str, List[str]]:
         """
-        Call OpenAI API to get response
+        Call OpenAI API to get response with rate limit handling
         
         Args:
             messages: List of input messages, each message is a dict containing role and content
@@ -127,19 +132,26 @@ class OpenAILLM(LLMBase):
         Returns:
             Union[str, List[str]]: Response text from LLM, either a single string or list of strings
         """
-        response = self.client.chat.completions.create(
-            model=model or self.model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            stop=stop_strs,
-            n=n
-        )
-        
-        if n == 1:
-            return response.choices[0].message.content
-        else:
-            return [choice.message.content for choice in response.choices]
+        try:
+            response = self.client.chat.completions.create(
+                model=model or self.model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                stop=stop_strs,
+                n=n
+            )
+            
+            if n == 1:
+                return response.choices[0].message.content
+            else:
+                return [choice.message.content for choice in response.choices]
+        except Exception as e:
+            if "429" in str(e) or "rate_limit" in str(e).lower():
+                logger.warning(f"Rate limit exceeded, will retry: {e}")
+            else:
+                logger.error(f"LLM Error: {e}")
+            raise e
     
     def get_embedding_model(self):
         return self.embedding_model 
