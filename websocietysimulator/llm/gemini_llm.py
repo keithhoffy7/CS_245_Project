@@ -2,7 +2,6 @@
 Gemini LLM Wrapper for WebSocietySimulator
 """
 
-import os
 from typing import Dict, List, Optional, Union
 import google.generativeai as genai
 from websocietysimulator.llm import LLMBase

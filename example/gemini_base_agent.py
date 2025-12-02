@@ -167,7 +167,7 @@ if __name__ == "__main__":
     simulator = Simulator(data_dir="/srv/output/data1/output", device="auto", cache=False)
 
     # Load scenarios
-    simulator.set_task_and_groundtruth(task_dir=f"./track2/{task_set}/tasks", groundtruth_dir=f"./track2/{task_set}/groundtruth")
+    simulator.set_task_and_groundtruth(task_dir=f"/srv/CS_245_Project/example/track2/{task_set}/tasks", groundtruth_dir=f"/srv/CS_245_Project/example/track2/{task_set}/groundtruth")
 
     # Set your custom agent 
     simulator.set_agent(MyRecommendationAgent)
@@ -180,7 +180,7 @@ if __name__ == "__main__":
 
     # Run evaluation
     # If you don't set the number of tasks, the simulator will run all tasks.
-    agent_outputs = simulator.run_simulation(number_of_tasks=None, enable_threading=True, max_workers=2)
+    agent_outputs = simulator.run_simulation(number_of_tasks=None, enable_threading=True, max_workers=10)
 
     # Evaluate the agent
     evaluation_results = simulator.evaluate()
