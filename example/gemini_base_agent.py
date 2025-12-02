@@ -1,4 +1,5 @@
 import json
+import os
 from websocietysimulator import Simulator
 from websocietysimulator.agent import RecommendationAgent
 import tiktoken
@@ -166,21 +167,24 @@ if __name__ == "__main__":
     simulator = Simulator(data_dir="/srv/output/data1/output", device="auto", cache=False)
 
     # Load scenarios
-    simulator.set_task_and_groundtruth(task_dir=f"/srv/CS_245_Project/example/track2/{task_set}/tasks", groundtruth_dir=f"/srv/CS_245_Project/example/track2/{task_set}/groundtruth")
+    simulator.set_task_and_groundtruth(task_dir=f"./track2/{task_set}/tasks", groundtruth_dir=f"./track2/{task_set}/groundtruth")
 
-    # Set your custom agent
+    # Set your custom agent 
     simulator.set_agent(MyRecommendationAgent)
 
     # Set LLM client
-    simulator.set_llm(GeminiLLM(api_key="AIzaSyCXt8zmGOF9q_Tmt286wsa2eaCz9_DABAQ"))
+    gemini_api_key = os.getenv("GEMINI_API_KEY")
+    if not gemini_api_key:
+        raise ValueError("GEMINI_API_KEY environment variable is not set")
+    simulator.set_llm(GeminiLLM(api_key=gemini_api_key))
 
     # Run evaluation
     # If you don't set the number of tasks, the simulator will run all tasks.
-    agent_outputs = simulator.run_simulation(number_of_tasks=None, enable_threading=True, max_workers=10)
+    agent_outputs = simulator.run_simulation(number_of_tasks=None, enable_threading=True, max_workers=2)
 
     # Evaluate the agent
     evaluation_results = simulator.evaluate()
-    with open(f'./evaluation_results_track2_{task_set}.json', 'w') as f:
+    with open(f'/srv/CS_245_Project/example/gemini_base_agent_evaluation_results.json', 'w') as f:
         json.dump(evaluation_results, f, indent=4)
 
     print(f"The evaluation_results is :{evaluation_results}")
