@@ -1,9 +1,5 @@
 import json
 import os
-import pickle
-from typing import Dict, List, Optional
-
-import numpy as np
 from websocietysimulator import Simulator
 from websocietysimulator.agent import RecommendationAgent
 import tiktoken
@@ -24,106 +20,28 @@ def num_tokens_from_string(string: str) -> int:
     return a
 
 
-# ---- BPR Model loading -------------------------------------
-
-BPR_MODEL_PATH = "/srv/CS_245_Project/example/bpr_model.pkl"
-_bpr_model_cache: Optional[Dict] = None
-
-
-def load_bpr_model() -> Optional[Dict]:
-    """Lazy-load BPR model if available."""
-    global _bpr_model_cache
-    if _bpr_model_cache is not None:
-        return _bpr_model_cache
-    
-    if os.path.exists(BPR_MODEL_PATH):
-        try:
-            with open(BPR_MODEL_PATH, "rb") as f:
-                _bpr_model_cache = pickle.load(f)
-            logging.info("Loaded BPR model (optimized for ranking).")
-            return _bpr_model_cache
-        except Exception as e:
-            logging.warning("Failed to load BPR model: %s", e)
-    
-    logging.warning("BPR model not found. Using LLM-only ranking.")
-    _bpr_model_cache = None
-    return None
-
-
-def get_bpr_ranking(user_id: str, candidate_ids: List[str]) -> Optional[List[str]]:
-    """
-    Get BPR ranking for candidates.
-    Returns ranking list or None if model/user not available.
-    """
-    model = load_bpr_model()
-    if model is None:
-        return None
-
-    user_factors = model.get("user_factors")
-    item_factors = model.get("item_factors")
-    user_id_to_idx = model.get("user_id_to_idx", {})
-    item_id_to_idx = model.get("item_id_to_idx", {})
-
-    if user_id not in user_id_to_idx:
-        return None
-
-    u_idx = user_id_to_idx[user_id]
-    if u_idx < 0 or u_idx >= user_factors.shape[0]:
-        return None
-
-    # Collect indices for candidates that exist in the BPR model
-    existing = []
-    for cid in candidate_ids:
-        idx = item_id_to_idx.get(cid)
-        if idx is not None and 0 <= idx < item_factors.shape[0]:
-            existing.append((cid, idx))
-
-    if not existing:
-        return None
-
-    # Compute dot-product scores between user and candidate item factors
-    u_vec = user_factors[u_idx]  # shape [k]
-    cand_indices = np.array([idx for _, idx in existing], dtype=np.int64)
-    cand_vecs = item_factors[cand_indices]  # [num_cand, k]
-    scores = cand_vecs @ u_vec
-
-    # Build ranking
-    scored = list(zip([cid for cid, _ in existing], scores))
-    scored.sort(key=lambda x: x[1], reverse=True)
-    ranked = [cid for cid, _ in scored]
-
-    # Append missing candidates at the end
-    for cid in candidate_ids:
-        if cid not in ranked:
-            ranked.append(cid)
-
-    return ranked
-
-
 class RecReasoning(ReasoningBase):
     """
     Custom reasoning module specialized for Amazon-style recommendations.
-    Similar structure to RecPlanning - very specific and structured.
+    Uses structured, step-by-step reasoning to analyze user preferences and rank items.
     """
 
     def __init__(self, profile_type_prompt, llm, memory=None):
         """Initialize the reasoning module"""
         super().__init__(profile_type_prompt=profile_type_prompt, memory=memory, llm=llm)
 
-    def create_prompt(self, task_description: str, merged_reviews: str, 
-                     readable_item_list: str, candidate_ids: List[str],
-                     bpr_guidance: str = "") -> str:
+    def create_prompt(self, task_description: str, merged_reviews: str,
+                      readable_item_list: str, candidate_ids: list[str]) -> str:
         """
         Create a structured reasoning prompt for Amazon-style product recommendations.
-        Similar to RecPlanning.create_prompt - very specific and emphasizes USER/ITEM/REVIEW.
+        Emphasizes USER/ITEM/REVIEW analysis with step-by-step reasoning.
         """
         prompt = '''You are a reasoning agent on an Amazon-style online shopping platform.
 Your task is to rank products for a user based on their historical preferences and product information.
 
-You have access to three key types of information:
+You have access to two key types of information:
 1. USER + REVIEW: The user's historical product reviews and star ratings
 2. ITEM: Detailed metadata for candidate products (titles, categories, ratings, descriptions, etc.)
-3. COLLABORATIVE FILTERING: BPR model predictions based on millions of user-item interactions
 
 Your reasoning process should follow these steps:
 
@@ -144,17 +62,11 @@ STEP 3: Match candidates to USER preferences (USER + ITEM + REVIEW)
 - Identify candidates that match the user's explicit preferences from review text
 - Identify candidates that are similar to liked items in category, features, or style
 
-STEP 4: Incorporate COLLABORATIVE FILTERING signals
-- Consider BPR model predictions as additional evidence
-- The BPR model learned patterns from millions of interactions
-- Use BPR suggestions as hints, but prioritize your analysis of the user's explicit review history
-
-STEP 5: Synthesize and rank
-- Combine all signals: review history, item attributes, similarity to liked/disliked items, BPR predictions
+STEP 4: Synthesize and rank
+- Combine all signals: review history, item attributes, similarity to liked/disliked items
 - Rank candidates from most preferred to least preferred
 - Items matching highly-rated past purchases should rank higher
 - Items similar to poorly-rated past purchases should rank lower
-- Items with high BPR scores that also match review history should rank highest
 
 CRITICAL RULES:
 - You must rank ALL {num_candidates} candidate items
@@ -175,8 +87,6 @@ USER + REVIEW Information (your historical reviews and ratings):
 ITEM Information (candidate products to rank):
 {readable_item_list}
 
-{bpr_guidance}
-
 CANDIDATE LIST (you must rank all of these):
 {candidate_ids}
 
@@ -187,14 +97,12 @@ Remember: Your output must be ONLY the ranked list, nothing else.
             merged_reviews=merged_reviews,
             readable_item_list=readable_item_list,
             candidate_ids=candidate_ids,
-            num_candidates=len(candidate_ids),
-            bpr_guidance=bpr_guidance
+            num_candidates=len(candidate_ids)
         )
         return prompt
 
     def __call__(self, task_description: str, merged_reviews: str,
-                 readable_item_list: str, candidate_ids: List[str],
-                 bpr_guidance: str = ""):
+                 readable_item_list: str, candidate_ids: list[str]):
         """
         Execute reasoning with structured prompt.
         """
@@ -202,8 +110,7 @@ Remember: Your output must be ONLY the ranked list, nothing else.
             task_description=task_description,
             merged_reviews=merged_reviews,
             readable_item_list=readable_item_list,
-            candidate_ids=candidate_ids,
-            bpr_guidance=bpr_guidance
+            candidate_ids=candidate_ids
         )
 
         messages = [{"role": "user", "content": prompt}]
@@ -218,16 +125,18 @@ Remember: Your output must be ONLY the ranked list, nothing else.
 
 class MyRecommendationAgent(RecommendationAgent):
     """
-    Combined agent: Keith's multi-step reasoning + Structured reasoning + BPR model
+    Agent using structured reasoning for Amazon-style recommendations.
+    Uses advanced step-by-step reasoning to analyze user preferences and rank items.
     """
 
     def __init__(self, llm: LLMBase):
         super().__init__(llm=llm)
-        self.reasoning = RecReasoning(profile_type_prompt='', llm=self.llm, memory=None)
+        self.reasoning = RecReasoning(
+            profile_type_prompt='', llm=self.llm, memory=None)
 
     def workflow(self):
         """
-        Simulate user behavior using Keith's multi-step reasoning + Structured reasoning + BPR model
+        Simulate user behavior using structured reasoning.
         Returns:
             list: Sorted list of item IDs
         """
@@ -293,9 +202,10 @@ class MyRecommendationAgent(RecommendationAgent):
 
         # Simple LLM call for merging reviews
         messages_merge = [{"role": "user", "content": merged_reviews_prompt}]
-        merged_reviews = self.llm(messages=messages_merge, temperature=0.1, max_tokens=4000)
+        merged_reviews = self.llm(
+            messages=messages_merge, temperature=0.1, max_tokens=4000)
 
-        # Step 5: Make candidate item list readable (Keith's approach)
+        # Step 5: Make candidate item list readable
         readable_item_list_prompt = f'''
         Below is a list of some information about certain candidate products. Please make this information into text that is readable and easy to understand.
         The information shown for each item should include the title, item id, average rating, rating number, and description in text format.
@@ -306,38 +216,23 @@ class MyRecommendationAgent(RecommendationAgent):
         '''
 
         # Simple LLM call for making items readable
-        messages_readable = [{"role": "user", "content": readable_item_list_prompt}]
-        readable_item_list = self.llm(messages=messages_readable, temperature=0.1, max_tokens=4000)
+        messages_readable = [
+            {"role": "user", "content": readable_item_list_prompt}]
+        readable_item_list = self.llm(
+            messages=messages_readable, temperature=0.1, max_tokens=4000)
 
-        # Step 6: Get BPR model ranking
+        # Step 6: Final ranking task using structured reasoning
         candidate_ids = self.task['candidate_list']
-        bpr_ranking = get_bpr_ranking(self.task['user_id'], candidate_ids)
-        if bpr_ranking:
-            print(f"BPR ranking (top 10): {bpr_ranking[:10]}")
-            # Get top 5 from BPR for guidance
-            bpr_top_5 = bpr_ranking[:5]
-            bpr_guidance = f"""
-NOTE: A collaborative filtering model (BPR) trained on millions of user-item interactions
-suggests these items might be relevant: {', '.join(bpr_top_5)}.
-However, prioritize your analysis of the user's explicit review history and preferences when ranking.
-The BPR model is just a hint - your detailed analysis of USER + ITEM + REVIEW information is primary.
-"""
-        else:
-            bpr_guidance = ""
-            bpr_ranking = None
-
-        # Step 7: Final ranking task using structured reasoning
         task_description = (
-            "Rank the candidate products for this user based on their review history, "
-            "item attributes, and collaborative filtering signals."
+            "Rank the candidate products for this user based on their review history "
+            "and item attributes."
         )
-        
+
         result = self.reasoning(
             task_description=task_description,
             merged_reviews=merged_reviews,
             readable_item_list=readable_item_list,
-            candidate_ids=candidate_ids,
-            bpr_guidance=bpr_guidance
+            candidate_ids=candidate_ids
         )
 
         # Parse the LLM ranking
@@ -348,14 +243,14 @@ The BPR model is just a hint - your detailed analysis of USER + ITEM + REVIEW in
             else:
                 print("No list found.")
                 return ['']
-            
+
             parsed = eval(result)
             if not isinstance(parsed, list):
                 print("Parsed output is not a list.")
                 return ['']
-            
+
             parsed = [str(x) for x in parsed]
-            
+
             # Filter to valid candidate_ids and preserve order
             candidate_set = set(candidate_ids)
             cleaned = []
@@ -368,29 +263,8 @@ The BPR model is just a hint - your detailed analysis of USER + ITEM + REVIEW in
                 if cid not in cleaned:
                     cleaned.append(cid)
 
-            # Combine BPR and LLM rankings (rank fusion)
-            # Use LLM as primary (it's better), BPR as light guidance
-            final_ranking = cleaned
-            if bpr_ranking:
-                try:
-                    rank_l = {cid: i for i, cid in enumerate(cleaned)}
-                    rank_b = {cid: i for i, cid in enumerate(bpr_ranking)}
-                    max_rank = len(candidate_ids)
-                    combined = []
-                    for cid in candidate_ids:
-                        rl = rank_l.get(cid, max_rank)
-                        rb = rank_b.get(cid, max_rank)
-                        # 90% LLM (structured reasoning works better), 10% BPR (light nudge)
-                        score = -(0.85 * rl + 0.15 * rb)
-                        combined.append((cid, score))
-                    combined.sort(key=lambda x: x[1], reverse=True)
-                    final_ranking = [cid for cid, _ in combined]
-                except Exception as e:
-                    print(f"Rank fusion failed, falling back to LLM ranking: {e}")
-                    final_ranking = cleaned
-
-            print('Processed Output:', final_ranking)
-            return final_ranking
+            print('Processed Output:', cleaned)
+            return cleaned
 
         except Exception as e:
             print(f'format error: {e}')
@@ -420,7 +294,7 @@ if __name__ == "__main__":
     # Run evaluation
     # If you don't set the number of tasks, the simulator will run all tasks.
     agent_outputs = simulator.run_simulation(
-        number_of_tasks=100, enable_threading=True, max_workers=10)
+        number_of_tasks=None, enable_threading=True, max_workers=10)
 
     # Evaluate the agent
     evaluation_results = simulator.evaluate()
@@ -428,4 +302,3 @@ if __name__ == "__main__":
         json.dump(evaluation_results, f, indent=4)
 
     print(f"The evaluation_results is :{evaluation_results}")
-

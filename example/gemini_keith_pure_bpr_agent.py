@@ -165,7 +165,7 @@ if __name__ == "__main__":
 
     # Run evaluation
     agent_outputs = simulator.run_simulation(
-        number_of_tasks=1, enable_threading=True, max_workers=10)
+        number_of_tasks=None, enable_threading=True, max_workers=10)
 
     # Evaluate the agent
     evaluation_results = simulator.evaluate()
