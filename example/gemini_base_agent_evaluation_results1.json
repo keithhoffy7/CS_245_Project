@@ -1,0 +1,18 @@
+{
+    "type": "recommendation",
+    "metrics": {
+        "top_1_hit_rate": 0.020618556701030927,
+        "top_3_hit_rate": 0.23711340206185566,
+        "top_5_hit_rate": 0.44587628865979384,
+        "average_hit_rate": 0.23453608247422678,
+        "total_scenarios": 388,
+        "top_1_hits": 8,
+        "top_3_hits": 92,
+        "top_5_hits": 173
+    },
+    "data_info": {
+        "evaluated_count": 388,
+        "original_simulation_count": 388,
+        "original_ground_truth_count": 388
+    }
+}

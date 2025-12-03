@@ -1,5 +1,6 @@
 import re
 import ast
+import json
 
 class PlanningBase():
     def __init__(self, llm):
@@ -24,9 +25,34 @@ class PlanningBase():
             messages=messages,
             temperature=0.1
         )
+        # Store raw LLM output for debugging
+        self.last_output = string
         
+        dicts = []
         dict_strings = re.findall(r"\{[^{}]*\}", string)
-        dicts = [ast.literal_eval(ds) for ds in dict_strings]
+        if dict_strings:
+            dicts = [ast.literal_eval(ds) for ds in dict_strings]
+        else:
+            json_match = re.search(r"\[[^\]]+\]", string, re.DOTALL)
+            if json_match:
+                try:
+                    parsed = json.loads(json_match.group())
+                    if isinstance(parsed, list):
+                        dicts = parsed
+                except json.JSONDecodeError:
+                    pass
+
+        if not dicts:
+            bullet_lines = []
+            for line in string.splitlines():
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                if re.match(r"^(\d+\.|[-*•])\s+", stripped):
+                    bullet_lines.append(re.sub(r"^(\d+\.|[-*•])\s*", "", stripped))
+            if bullet_lines:
+                dicts = [{"description": item} for item in bullet_lines]
+
         self.plan = dicts
         return self.plan
     
@@ -103,33 +129,48 @@ Task:{task_description}
 
 class PlanningVoyager(PlanningBase):
     def create_prompt(self, task_type, task_description, feedback, few_shot):
-        if feedback == '':
-            prompt = '''You are a helpful assistant that generates subgoals to complete any {task_type} task specified by me.
-I'll give you a final task, you need to decompose the task into a list of subgoals.
-You must follow the following criteria:
-1) Return a  list of subgoals that can be completed in order to complete the specified task.
-2) Give the reasoning instructions for each subgoal and the instructions for calling the tool. 
-You also need to give the reasoning instructions for each subtask and the instructions for calling the tool. Your output format should follow the example below.
-The following are some examples:
-Task: {example}
+        base_prompt = '''You are a helpful assistant that generates subgoals to complete an {task_type} on an online shopping platform (similar to Amazon).
+The goal is to recommend products to a user based on their historical reviews and a list of candidate items.
+You must decompose the final recommendation task into a list of subgoals that can be executed in order.
 
-Task: {task_description}
-'''
-        else:
-            prompt = '''You are a helpful assistant that generates subgoals to complete any {task_type} task specified by me.
-I'll give you a final task, you need to decompose the task into a list of subgoals.
-You must follow the following criteria:
-1) Return a list of subgoals that can be completed in order to complete the specified task.
-2) Give the reasoning instructions for each subgoal and the instructions for calling the tool. 
-You also need to give the reasoning instructions for each subtask and the instructions for calling the tool. Your output format should follow the example below.
+Each subgoal should focus on using the available data sources:
+- user profile and historical reviews: via interaction_tool.get_user(user_id=<user_id>) and interaction_tool.get_reviews(user_id=<user_id>)
+- candidate item metadata (titles, categories, star ratings, review counts, attributes, descriptions, etc.): via interaction_tool.get_item(item_id=<item_id>)
+
+Return ONLY a valid JSON array (no prose) where each element is an object containing:
+    "description": short actionable text that clearly mentions whether it uses USER, ITEM, or REVIEW information,
+    "reasoning instruction": why this step matters for improving product recommendations,
+    "tool instruction": an explicit call pattern for the tool you would use, or "None" if no tool is needed.
+
+Example output:
+[
+  {{"description": "Retrieve the target user's historical Amazon-style reviews and ratings",
+    "reasoning instruction": "Understand the user's real purchase and review history to infer preferences",
+    "tool instruction": "interaction_tool.get_reviews(user_id=<user_id>)"}},
+  {{"description": "Fetch metadata (title, category, star rating, review_count, attributes, description) for each candidate item",
+    "reasoning instruction": "Compare each product's attributes against the user's past liked items",
+    "tool instruction": "interaction_tool.get_item(item_id=<item_id>)"}}
+]
+
+Do not wrap the JSON in markdown or explanations. The JSON array should be directly parseable.'''
+
+        if feedback == '':
+            prompt = f"""{base_prompt}
 The following are some examples:
-Task: {example}
+Task: {{example}}
+
+Task: {{task_description}}
+"""
+        else:
+            prompt = f"""{base_prompt}
+The following are some examples:
+Task: {{example}}
 
 end
 --------------------
-reflexion:{feedback}
-task:{task_description}
-'''
+reflexion:{{feedback}}
+task:{{task_description}}
+"""
         return prompt.format(example=few_shot, task_description=task_description, task_type=task_type, feedback=feedback)
 
 class PlanningOPENAGI(PlanningBase):
