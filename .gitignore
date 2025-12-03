@@ -18,3 +18,4 @@ TODO
 db/
 dataset/
 .venv/
+*.pkl

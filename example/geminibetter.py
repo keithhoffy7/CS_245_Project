@@ -31,34 +31,65 @@ def num_tokens_from_string(string: str) -> int:
     return a
 
 
-# ---- Matrix Factorization model loading -------------------------------------
+# ---- Recommender model loading (WARP > BPR > MF) -------------------------------------
 
+WARP_MODEL_PATH = "/srv/CS_245_Project/example/warp_model.pkl"
+BPR_MODEL_PATH = "/srv/CS_245_Project/example/bpr_model.pkl"
 MF_MODEL_PATH = "/srv/CS_245_Project/example/mf_model.pkl"
-_mf_model_cache: Optional[Dict] = None
+_recommender_model_cache: Optional[Dict] = None
+
+
+def load_recommender_model() -> Optional[Dict]:
+    """Lazy-load WARP model (best), BPR model, or MF model (fallback) if available."""
+    global _recommender_model_cache
+    if _recommender_model_cache is not None:
+        return _recommender_model_cache
+    
+    # Try WARP first (best for ranking with explicit negatives)
+    if os.path.exists(WARP_MODEL_PATH):
+        try:
+            with open(WARP_MODEL_PATH, "rb") as f:
+                _recommender_model_cache = pickle.load(f)
+            logging.info("Loaded WARP model (optimized for ranking with explicit negatives).")
+            return _recommender_model_cache
+        except Exception as e:
+            logging.warning("Failed to load WARP model: %s", e)
+    
+    # Try BPR second (better for ranking)
+    if os.path.exists(BPR_MODEL_PATH):
+        try:
+            with open(BPR_MODEL_PATH, "rb") as f:
+                _recommender_model_cache = pickle.load(f)
+            logging.info("Loaded BPR model (optimized for ranking).")
+            return _recommender_model_cache
+        except Exception as e:
+            logging.warning("Failed to load BPR model: %s", e)
+    
+    # Fall back to MF/ALS
+    if os.path.exists(MF_MODEL_PATH):
+        try:
+            with open(MF_MODEL_PATH, "rb") as f:
+                _recommender_model_cache = pickle.load(f)
+            logging.info("Loaded MF/ALS model (fallback).")
+            return _recommender_model_cache
+        except Exception as e:
+            logging.warning("Failed to load MF model: %s", e)
+    
+    logging.warning("No recommender model found. Using LLM-only ranking.")
+    _recommender_model_cache = None
+    return None
 
 
 def load_mf_model() -> Optional[Dict]:
-    """Lazy-load MF model (user/item factors + id mappings) if available."""
-    global _mf_model_cache
-    if _mf_model_cache is not None:
-        return _mf_model_cache
-    if not os.path.exists(MF_MODEL_PATH):
-        logging.warning("MF model not found at %s; using LLM-only ranking.", MF_MODEL_PATH)
-        return None
-    try:
-        with open(MF_MODEL_PATH, "rb") as f:
-            _mf_model_cache = pickle.load(f)
-        return _mf_model_cache
-    except Exception as e:
-        logging.warning("Failed to load MF model from %s: %s", MF_MODEL_PATH, e)
-        _mf_model_cache = None
-        return None
+    """Legacy function for backward compatibility."""
+    return load_recommender_model()
 
 
-def rank_candidates_by_mf(user_id: str, candidate_ids: List[str]) -> Optional[List[str]]:
+def get_mf_scores_and_ranking(user_id: str, candidate_ids: List[str]) -> Optional[tuple]:
     """
-    Rank candidates using a pre-trained MF model, if available.
-    Returns None if model or user/candidates are not covered.
+    Get MF scores and ranking for candidates.
+    Returns (scores_dict, ranking_list) or None if model/user not available.
+    scores_dict maps item_id -> float score (higher = better match).
     """
     model = load_mf_model()
     if model is None:
@@ -95,16 +126,38 @@ def rank_candidates_by_mf(user_id: str, candidate_ids: List[str]) -> Optional[Li
     cand_vecs = item_factors[cand_indices]  # [num_cand, k]
     scores = cand_vecs @ u_vec
 
+    # Build scores dict (normalize to 0-1 range for readability)
+    scores_dict = {}
+    if len(scores) > 0:
+        min_score = float(scores.min())
+        max_score = float(scores.max())
+        score_range = max_score - min_score if max_score > min_score else 1.0
+        for (cid, _), raw_score in zip(existing, scores):
+            # Normalize to 0-1, then scale to 0-10 for easier interpretation
+            normalized = (float(raw_score) - min_score) / score_range if score_range > 0 else 0.5
+            scores_dict[cid] = normalized * 10.0  # Scale to 0-10
+
+    # Build ranking
     scored = list(zip([cid for cid, _ in existing], scores))
     scored.sort(key=lambda x: x[1], reverse=True)
     ranked = [cid for cid, _ in scored]
 
-    # Append missing candidates at the end, preserving original order
+    # Append missing candidates at the end
     for cid in candidate_ids:
         if cid not in ranked:
             ranked.append(cid)
+            scores_dict[cid] = 0.0  # Unknown items get 0 score
 
-    return ranked
+    return scores_dict, ranked
+
+
+def rank_candidates_by_mf(user_id: str, candidate_ids: List[str]) -> Optional[List[str]]:
+    """Legacy function for backward compatibility. Returns just ranking."""
+    result = get_mf_scores_and_ranking(user_id, candidate_ids)
+    if result is None:
+        return None
+    _, ranking = result
+    return ranking
 
 
 def rank_candidates_by_popularity(candidate_ids, item_list):
@@ -269,10 +322,12 @@ class MyRecommendationAgent(RecommendationAgent):
         # Use the custom planning module
         try:
             task_description = (
-                "Plan how to recommend products on an Amazon-style platform using "
-                "USER historical reviews and ratings, ITEM metadata for a fixed "
-                "candidate list, and REVIEW texts. Decompose the steps needed to "
-                "gather and analyze this information before ranking the candidates."
+                "Plan how to recommend products on an Amazon-style platform. You have access to: "
+                "(1) USER historical reviews and ratings, (2) ITEM metadata for a fixed candidate list, "
+                "(3) REVIEW texts, (4) a trained collaborative filtering model (BPR/MF) that provides "
+                "match scores for each candidate, and (5) memory of past successful recommendations. "
+                "Decompose the steps needed to gather this information and combine MF model predictions "
+                "with user history to rank the candidates."
             )
             plan = self.planning(
                 task_type='Recommendation Task',
@@ -334,37 +389,98 @@ class MyRecommendationAgent(RecommendationAgent):
             else:
                 pass
 
-        # Optional: retrieve relevant past trajectories from memory
+        # Retrieve relevant past trajectories from memory (improved query)
         memory_context = ""
+        user_top_choices = []
         if getattr(self, "memory", None) is not None:
             try:
-                query = (
+                # Query 1: Look for this specific user's past successful choices
+                user_query = f"user_id={self.task['user_id']} successful top recommendation"
+                user_memory = self.memory(user_query)
+                
+                # Query 2: Look for similar recommendation scenarios
+                scenario_query = (
                     f"recommendation task; user_id={self.task['user_id']}; "
-                    f"candidates={self.task['candidate_list']}"
+                    f"candidates={self.task['candidate_list'][:5]}..."  # First 5 for similarity
                 )
-                memory_context = self.memory(query)
-            except Exception:
+                scenario_memory = self.memory(scenario_query)
+                
+                # Combine memories
+                if user_memory:
+                    memory_context += f"Past successful choices for this user:\n{user_memory}\n\n"
+                if scenario_memory:
+                    memory_context += f"Similar recommendation scenarios:\n{scenario_memory}\n\n"
+                    
+                # Extract top choices from memory if available
+                if user_memory:
+                    # Try to extract item IDs from memory text
+                    import re
+                    item_pattern = r'B[A-Z0-9]{9}'  # Amazon ASIN pattern
+                    found_items = re.findall(item_pattern, user_memory)
+                    user_top_choices = found_items[:5]  # Top 5 past choices
+            except Exception as e:
+                logging.warning(f"Memory retrieval failed: {e}")
                 memory_context = ""
 
         memory_block = ""
         if memory_context:
             memory_block = (
-                "Here are some past successful recommendation trajectories that may help you:\n"
-                f"{memory_context}\n\n"
+                "IMPORTANT: Past successful recommendations for this user or similar scenarios:\n"
+                f"{memory_context}"
+                "Use these as strong signals - if an item appeared as a top choice before, "
+                "it's likely a good match for this user.\n\n"
+            )
+        elif user_top_choices:
+            memory_block = (
+                f"Past top choices for this user: {', '.join(user_top_choices)}\n"
+                "If any of these appear in your candidate list, strongly consider ranking them highly.\n\n"
             )
 
         candidate_ids = self.task['candidate_list']
 
-        # MF baseline ranking over the same candidates (primary if available)
-        mf_ranking = rank_candidates_by_mf(self.task['user_id'], candidate_ids)
-        if mf_ranking:
-            print("MF ranking:", mf_ranking)
+        # Get model scores and ranking (BPR preferred, MF fallback)
+        mf_result = get_mf_scores_and_ranking(self.task['user_id'], candidate_ids)
+        mf_scores = None
+        mf_ranking = None
+        model_type = "none"
+        if mf_result:
+            mf_scores, mf_ranking = mf_result
+            model_obj = load_recommender_model()
+            model_type = model_obj.get("model_type", "mf") if model_obj else "mf"
+            print(f"{model_type.upper()} ranking:", mf_ranking[:10], "...")
+            print(f"{model_type.upper()} scores (0-10 scale, top 5):", {k: f"{v:.2f}" for k, v in list(mf_scores.items())[:5]})
 
         # Non-LLM baseline ranking (popularity-based) over the same candidates (secondary)
         heuristic_ranking = []
         if item_list:
             heuristic_ranking = rank_candidates_by_popularity(candidate_ids, item_list)
             print("Heuristic (popularity) ranking:", heuristic_ranking)
+
+        # Build MF guidance block for LLM prompt
+        mf_guidance = ""
+        if mf_scores and mf_ranking:
+            # Get top 5 and bottom 3 by MF score
+            sorted_by_score = sorted(mf_scores.items(), key=lambda x: x[1], reverse=True)
+            top_items = [f"{cid} (score: {score:.2f})" for cid, score in sorted_by_score[:5]]
+            bottom_items = [f"{cid} (score: {score:.2f})" for cid, score in sorted_by_score[-3:]]
+            
+            mf_guidance = f"""
+IMPORTANT: A collaborative filtering model (trained on millions of user-item interactions)
+has analyzed your preferences and provided match scores for each candidate item.
+
+MF Model Predictions (0-10 scale, higher = better match for you):
+- Top recommended items: {', '.join(top_items)}
+- Lower match items: {', '.join(bottom_items)}
+
+The MF model learned patterns from users similar to you and items similar to ones you've
+interacted with. Use these scores as a strong signal, but also consider:
+- Your specific review text and explicit preferences
+- Item attributes, categories, and descriptions
+- How well items match your past 4-5 star ratings vs 1-2 star ratings
+
+You should generally favor items with higher MF scores, but you can override if your
+review history suggests a different preference pattern.
+"""
 
         # Reasoning prompt: ask directly for a ranked list of item_ids (like baseline),
         # but keep all the stronger Amazon-specific guidance and include a small example.
@@ -386,9 +502,17 @@ For each candidate, you can see detailed metadata such as:
 The information for these candidate items is as follows:
 {item_list}
 
-{memory_block}Use the above historical trajectories only as additional hints; the
-final ranking must still be consistent with your own preferences inferred from
-your review history.
+{mf_guidance}
+
+{memory_block}CRITICAL: If you see past successful top choices for this user in the memory above,
+and any of those items appear in your candidate list, you should STRONGLY prioritize ranking them
+in the top 3 positions. The memory shows what actually worked for this user before.
+
+Combine all signals:
+1. MF model scores (strong collaborative signal)
+2. Past successful choices from memory (proven to work for this user)
+3. Your review history and explicit preferences
+4. Item attributes and similarity to liked/disliked items
 
 EXAMPLE (for format and behavior ONLY — do NOT reuse these IDs):
 
@@ -408,25 +532,33 @@ and X2 is similar to products you disliked.
 YOUR JOB:
 
 1. For EACH candidate item in {candidate_ids}, infer how much YOU would like it,
-   based ONLY on:
-   - your past reviews and star ratings, and
+   based on:
+   - MF model match scores (if provided above) — these are learned from millions of
+     interactions and should be given HIGH WEIGHT in your ranking
+   - your past reviews and star ratings
    - how similar the item is (in category, attributes, description, etc.)
-     to items you rated 4–5 stars versus 1–2 stars.
+     to items you rated 4–5 stars versus 1–2 stars
 
 2. Use that reasoning to RANK ALL candidate items from most preferred to least
    preferred.
 
 When ranking:
+- STRONGLY PRIORITIZE items with high MF scores (8-10) — the collaborative filtering
+  model has strong evidence these match your preferences
+- Also consider items with medium MF scores (5-7) if they match your review text
+  or explicit preferences
+- Generally DEPRIORITIZE items with low MF scores (0-4) unless your review history
+  shows a clear pattern contradicting the MF prediction
 - Strongly INCREASE the rank for items whose attributes/description closely match
-  products you rated 4–5 stars in your history.
-- Strongly DECREASE the rank for items similar to products you rated 1–2 stars.
+  products you rated 4–5 stars in your history
+- Strongly DECREASE the rank for items similar to products you rated 1–2 stars
 - Pay attention to specific aspects mentioned in your reviews (e.g., durability,
-  comfort, writing style, genre, features) and prefer items that match those aspects.
+  comfort, writing style, genre, features) and prefer items that match those aspects
 - If an item is in a category you never interacted with and it doesn't resemble your
-  liked items, put it lower in the ranking.
+  liked items, put it lower in the ranking
 
-Your goal is NOT to guess global popularity or rating, but YOUR PERSONAL PREFERENCE
-based on your review history.
+Your goal is to combine MF model predictions (which capture collaborative patterns)
+with your personal review history to make the best ranking.
 
 OUTPUT FORMAT (very important):
 
@@ -476,7 +608,8 @@ RULES:
                 if cid not in cleaned:
                     cleaned.append(cid)
 
-            # Combine MF, LLM, and heuristic rankings (rank fusion).
+            # Combine model (BPR/MF), LLM, and heuristic rankings (rank fusion).
+            # Heavily weight the trained model since it's optimized for this task.
             final_ranking = cleaned
             try:
                 rank_l = {cid: i for i, cid in enumerate(cleaned)}
@@ -488,8 +621,14 @@ RULES:
                     rl = rank_l.get(cid, max_rank)
                     rh = rank_h.get(cid, max_rank)
                     rm = rank_m.get(cid, max_rank)
-                    # Heavier weight on MF, then LLM, then heuristic
-                    score = -(0.6 * rm + 0.3 * rl + 0.1 * rh)
+                    # Very heavy weight on trained model (BPR/MF), light weight on LLM/heuristic
+                    # Model is trained on millions of interactions and optimized for ranking
+                    if mf_ranking:
+                        # 85% model, 10% LLM, 5% heuristic
+                        score = -(0.85 * rm + 0.10 * rl + 0.05 * rh)
+                    else:
+                        # No model available, fall back to LLM + heuristic
+                        score = -(0.7 * rl + 0.3 * rh) if heuristic_ranking else -rl
                     combined.append((cid, score))
                 combined.sort(key=lambda x: x[1], reverse=True)
                 final_ranking = [cid for cid, _ in combined]
@@ -499,18 +638,36 @@ RULES:
 
             print('Processed Output:', final_ranking)
 
-            # Store trajectory into Voyager memory for future tasks
+            # Store successful patterns in memory for future tasks
             if getattr(self, "memory", None) is not None:
                 try:
+                    user_id = self.task.get("user_id")
+                    top_choice = final_ranking[0] if final_ranking else None
+                    
+                    # Store 1: User's top choice (for future recommendations to same user)
+                    if top_choice:
+                        user_pattern = (
+                            f"user_id={user_id} successful top recommendation: {top_choice}. "
+                            f"This user strongly preferred {top_choice} when given candidates {candidate_ids[:5]}..."
+                        )
+                        self.memory(f"review:{user_pattern}")
+                    
+                    # Store 2: Full trajectory (for similar scenarios)
                     trajectory = {
-                        "user_id": self.task.get("user_id"),
+                        "user_id": user_id,
                         "candidate_list": candidate_ids,
-                        "history_review": history_review,
-                        "ranking": final_ranking,
+                        "top_choice": top_choice,
+                        "mf_top_choice": mf_ranking[0] if mf_ranking else None,
+                        "ranking": final_ranking[:5],  # Store top 5
                     }
-                    self.memory(f"review:{trajectory}")
-                except Exception:
-                    pass
+                    trajectory_str = (
+                        f"User {user_id} recommendation: top choice was {top_choice}. "
+                        f"MF model predicted {trajectory['mf_top_choice']}. "
+                        f"Top 5 ranking: {final_ranking[:5]}"
+                    )
+                    self.memory(f"review:{trajectory_str}")
+                except Exception as e:
+                    logging.warning(f"Memory storage failed: {e}")
 
             return final_ranking
 
@@ -525,7 +682,7 @@ if __name__ == "__main__":
     simulator = Simulator(
         data_dir="/srv/output/data1/output",
         device="auto",
-        cache=False
+        cache=False  # Disabled to avoid permission errors with cache directory
     )
 
     # Load scenarios
@@ -544,6 +701,7 @@ if __name__ == "__main__":
     simulator.set_llm(GeminiLLM(api_key=gemini_api_key))
 
     # Run evaluation (all tasks)
+    # Reduced workers to avoid OOM - WARP model is large (~3.5GB+)
     agent_outputs = simulator.run_simulation(
         number_of_tasks=None,
         enable_threading=True,
