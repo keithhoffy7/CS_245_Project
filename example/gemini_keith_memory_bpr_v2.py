@@ -38,7 +38,7 @@ def load_bpr_model() -> Optional[Dict]:
     global _bpr_model_cache
     if _bpr_model_cache is not None:
         return _bpr_model_cache
-    
+
     if os.path.exists(BPR_MODEL_PATH):
         try:
             with open(BPR_MODEL_PATH, "rb") as f:
@@ -47,7 +47,7 @@ def load_bpr_model() -> Optional[Dict]:
             return _bpr_model_cache
         except Exception as e:
             logging.warning("Failed to load BPR model: %s", e)
-    
+
     logging.warning("BPR model not found. Using LLM-only ranking.")
     _bpr_model_cache = None
     return None
@@ -113,21 +113,31 @@ class RecReasoning(ReasoningBase):
         """Initialize the reasoning module"""
         super().__init__(profile_type_prompt=profile_type_prompt, memory=memory, llm=llm)
 
-    def create_prompt(self, task_description: str, merged_reviews: str, 
-                     readable_item_list: str, candidate_ids: List[str],
-                     bpr_guidance: str = "", memory_guidance: str = "") -> str:
+    def create_prompt(
+        self,
+        task_description: str,
+        merged_reviews: str,
+        readable_item_list: str,
+        candidate_ids: List[str],
+        user_pref_summary: str = "",
+        bpr_guidance: str = "",
+        memory_guidance: str = "",
+    ) -> str:
         """
         Create a structured reasoning prompt for Amazon-style product recommendations.
-        Similar to RecPlanning.create_prompt - very specific and emphasizes USER/ITEM/REVIEW.
+        Includes a short user preference summary and clearer guidance on how to use memory/BPR.
         """
         prompt = '''You are a reasoning agent on an Amazon-style online shopping platform.
 Your task is to rank products for a user based on their historical preferences and product information.
 
 You have access to four key types of information:
 1. USER + REVIEW: The user's historical product reviews and star ratings
-2. ITEM: Detailed metadata for candidate products (titles, categories, ratings, descriptions, etc.)
-3. COLLABORATIVE FILTERING: BPR model predictions based on millions of user-item interactions
-4. MEMORY: Past successful recommendations for this user or similar scenarios
+2. USER PREFERENCE SUMMARY: A short summary of what this user tends to like and dislike
+3. ITEM: Detailed metadata for candidate products (titles, categories, ratings, descriptions, etc.)
+4. MEMORY + COLLABORATIVE FILTERING: Past successful recommendation trajectories and BPR model hints
+
+USER PREFERENCE SUMMARY (very important):
+{user_pref_summary}
 
 Your reasoning process should follow these steps:
 
@@ -150,24 +160,22 @@ STEP 3: Match candidates to USER preferences (USER + ITEM + REVIEW)
 
 STEP 4: Incorporate MEMORY signals
 {memory_guidance}
-- If memory shows past successful top choices for this user, consider those items favorably
-- Memory contains proven recommendations that worked for this user before
-- Use memory as additional evidence, but balance it with current review analysis and item attributes
-- Items from memory that also match current preferences should rank higher
+- Memory summarizes past successful recommendation trajectories (for this or similar users)
+- If memory highlights specific items that worked well in similar scenarios AND they appear in candidates,
+  consider them favorably, but still check them against this user's preferences
 
-STEP 5: Incorporate COLLABORATIVE FILTERING signals
+STEP 5: Incorporate COLLABORATIVE FILTERING (BPR) signals
 {bpr_guidance}
-- Consider BPR model predictions as additional evidence
-- The BPR model learned patterns from millions of interactions
-- Use BPR suggestions as hints, but prioritize your analysis of the user's explicit review history
+- BPR provides a ranking learned from many users; treat it as a useful hint, not as ground truth
+- When BPR suggestions align with the user's preferences and memory signals, you should rank those items higher
 
 STEP 6: Synthesize and rank
-- Combine all signals: review history (primary), item attributes, memory (if available), similarity to liked/disliked items, BPR predictions
+- Combine all signals: review history (primary), user preference summary, item attributes, memory (if available),
+  similarity to liked/disliked items, and BPR predictions (if available)
 - Rank candidates from most preferred to least preferred
-- Items matching highly-rated past purchases should rank higher
+- Items matching highly-rated past purchases AND fitting the preference summary should rank higher
 - Items similar to poorly-rated past purchases should rank lower
-- Items with high BPR scores that also match review history should rank high
-- Memory items should get a boost if they align with current preferences
+- Items with strong support from memory and BPR that also match preferences should rank very high
 
 CRITICAL RULES:
 - You must rank ALL {num_candidates} candidate items
@@ -175,7 +183,6 @@ CRITICAL RULES:
 - Do NOT invent new item IDs
 - Do NOT omit any candidate items
 - Your output must be ONLY a Python list, no other text
-- Balance all signals naturally - don't force any single signal
 
 OUTPUT FORMAT:
 Return ONLY a Python-style list of strings in this exact format:
@@ -189,8 +196,10 @@ USER + REVIEW Information (your historical reviews and ratings):
 ITEM Information (candidate products to rank):
 {readable_item_list}
 
+MEMORY + PAST SUCCESSFUL TRAJECTORIES (if any):
 {memory_guidance}
 
+COLLABORATIVE FILTERING HINTS (if any):
 {bpr_guidance}
 
 CANDIDATE LIST (you must rank all of these):
@@ -205,13 +214,21 @@ Remember: Your output must be ONLY the ranked list, nothing else.
             candidate_ids=candidate_ids,
             num_candidates=len(candidate_ids),
             bpr_guidance=bpr_guidance,
-            memory_guidance=memory_guidance
+            memory_guidance=memory_guidance,
+            user_pref_summary=user_pref_summary,
         )
         return prompt
 
-    def __call__(self, task_description: str, merged_reviews: str,
-                 readable_item_list: str, candidate_ids: List[str],
-                 bpr_guidance: str = "", memory_guidance: str = ""):
+    def __call__(
+        self,
+        task_description: str,
+        merged_reviews: str,
+        readable_item_list: str,
+        candidate_ids: List[str],
+        user_pref_summary: str = "",
+        bpr_guidance: str = "",
+        memory_guidance: str = "",
+    ):
         """
         Execute reasoning with structured prompt.
         """
@@ -220,8 +237,9 @@ Remember: Your output must be ONLY the ranked list, nothing else.
             merged_reviews=merged_reviews,
             readable_item_list=readable_item_list,
             candidate_ids=candidate_ids,
+            user_pref_summary=user_pref_summary,
             bpr_guidance=bpr_guidance,
-            memory_guidance=memory_guidance
+            memory_guidance=memory_guidance,
         )
 
         messages = [{"role": "user", "content": prompt}]
@@ -236,7 +254,7 @@ Remember: Your output must be ONLY the ranked list, nothing else.
 
 class MyRecommendationAgent(RecommendationAgent):
     """
-    Combined agent: Keith's multi-step reasoning + Structured reasoning + BPR model + Memory
+    Improved agent: Keith's multi-step reasoning + Structured reasoning + BPR model + Enhanced Memory
     """
 
     def __init__(self, llm: LLMBase):
@@ -244,6 +262,24 @@ class MyRecommendationAgent(RecommendationAgent):
         # Add MemoryVoyager for storing and retrieving past successful recommendations
         self.memory = MemoryVoyager(llm=self.llm)
         self.reasoning = RecReasoning(profile_type_prompt='', llm=self.llm, memory=self.memory)
+
+    def _summarize_user_preferences(self, history_review: str) -> str:
+        """Use LLM to summarize user preferences from raw review dict text."""
+        pref_prompt = f"""
+You are given a list of this user's past reviews (stars, titles, texts, item ids).
+Summarize their preferences in 3-5 short bullet-style phrases, focusing on:
+- product categories/genres they like
+- attributes they value (e.g., durable, comfortable, long battery life, genre, writing style)
+- clear dislikes or deal-breakers
+
+Reviews:
+{history_review}
+
+Your output should be a concise paragraph or bullet list (no more than 4 sentences).
+"""
+        messages = [{"role": "user", "content": pref_prompt}]
+        summary = self.llm(messages=messages, temperature=0.2, max_tokens=400)
+        return summary.strip()
 
     def workflow(self):
         """
@@ -288,6 +324,9 @@ class MyRecommendationAgent(RecommendationAgent):
             history_review = encoding.decode(
                 encoding.encode(history_review)[:12000])
 
+        # Step 2.1: Summarize user preferences (used both in reasoning and memory)
+        user_pref_summary = self._summarize_user_preferences(history_review)
+
         # Step 3: Get item information for reviewed items
         reviewed_items = []
         for review in history_review_dict:
@@ -300,72 +339,58 @@ class MyRecommendationAgent(RecommendationAgent):
                                  for key in keys_to_extract if key in item}
                 reviewed_items.append(filtered_item)
 
-        # Step 4: Retrieve memory (past successful recommendations)
+        # Step 4: Retrieve memory (past successful recommendation trajectories)
         memory_context = ""
-        user_top_choices = []
+        memory_items = []
+        memory_ranking = None
+
         if getattr(self, "memory", None) is not None:
             try:
-                # Query 1: Look for this specific user's past successful choices
-                user_query = f"user_id={self.task['user_id']} successful top recommendation"
-                user_memory = self.memory(user_query)
-                
-                # Query 2: Look for similar recommendation scenarios
-                scenario_query = (
-                    f"recommendation task; user_id={self.task['user_id']}; "
-                    f"candidates={self.task['candidate_list'][:5]}..."  # First 5 for similarity
+                # Build a richer scenario description for memory retrieval
+                scenario_descriptor = (
+                    f"user_pref: {user_pref_summary}\n"
+                    f"user_id: {self.task['user_id']}\n"
+                    f"candidates_sample: {candidate_ids[:8]}"
                 )
-                scenario_memory = self.memory(scenario_query)
-                
-                # Combine memories
-                if user_memory:
-                    memory_context += f"Past successful choices for this user:\n{user_memory}\n\n"
-                if scenario_memory:
-                    memory_context += f"Similar recommendation scenarios:\n{scenario_memory}\n\n"
-                    
-                # Extract top choices from memory if available
-                if user_memory:
-                    # Try to extract item IDs from memory text
+
+                # Retrieve the most similar past trajectory
+                raw_memory = self.memory(scenario_descriptor) or ""
+
+                if raw_memory:
+                    memory_context += f"Most similar past recommendation trajectory:\n{raw_memory}\n\n"
+
+                    # Extract item IDs that appeared as successful top choices or top-ranked items
                     item_pattern = r'B[A-Z0-9]{9}'  # Amazon ASIN pattern
-                    found_items = re.findall(item_pattern, user_memory)
-                    user_top_choices = found_items[:5]  # Top 5 past choices
+                    found_items = re.findall(item_pattern, raw_memory)
+                    # Deduplicate while preserving order
+                    seen = set()
+                    for it in found_items:
+                        if it not in seen:
+                            seen.add(it)
+                            memory_items.append(it)
+
             except Exception as e:
                 logging.warning(f"Memory retrieval failed: {e}")
                 memory_context = ""
+                memory_items = []
 
-        # Build memory guidance block (subtle, not prescriptive)
-        memory_guidance = ""
-        memory_ranking = None  # Will be used in rank fusion
-        
-        # Extract memory items from both memory_context and user_top_choices
-        memory_items = []
-        if user_top_choices:
-            memory_items = user_top_choices
-        elif memory_context:
-            # Try to extract item IDs from memory context text
-            item_pattern = r'B[A-Z0-9]{9}'  # Amazon ASIN pattern
-            found_items = re.findall(item_pattern, memory_context)
-            memory_items = found_items[:5]  # Top 5 from memory
-        
         # Create memory-based ranking if we have memory items in candidates
         if memory_items:
             memory_items_in_candidates = [cid for cid in memory_items if cid in candidate_ids]
             if memory_items_in_candidates:
-                # Memory items first, then rest (but this is just for rank fusion, not forced)
-                memory_ranking = memory_items_in_candidates + [cid for cid in candidate_ids if cid not in memory_items_in_candidates]
-        
+                # Memory items first, then rest (for rank fusion)
+                memory_ranking = memory_items_in_candidates + [
+                    cid for cid in candidate_ids if cid not in memory_items_in_candidates
+                ]
+
         # Build guidance text
+        memory_guidance = ""
         if memory_context:
             memory_guidance = (
-                "Additional context: Past successful recommendations for this user or similar scenarios:\n"
+                "Additional context from similar past recommendation tasks:\n"
                 f"{memory_context}"
-                "Note: Items that appeared as successful recommendations before may be relevant, "
-                "but evaluate them based on current preferences and item attributes.\n\n"
-            )
-        elif memory_items:
-            memory_guidance = (
-                f"Additional context: Past top choices for this user: {', '.join(memory_items[:5])}\n"
-                "Note: These items worked well for this user before. Consider them favorably "
-                "if they align with current preferences and item attributes.\n\n"
+                "Items that repeatedly appeared as successful top choices in similar scenarios "
+                "should be considered strong candidates IF they also match this user's preferences.\n\n"
             )
 
         # Step 5: Merge reviews with item information (Keith's approach)
@@ -412,26 +437,28 @@ class MyRecommendationAgent(RecommendationAgent):
             # Get top 5 from BPR for guidance
             bpr_top_5 = bpr_ranking[:5]
             bpr_guidance = f"""
-NOTE: A collaborative filtering model (BPR) trained on millions of user-item interactions
+NOTE: A collaborative filtering model (BPR) trained on many user-item interactions
 suggests these items might be relevant: {', '.join(bpr_top_5)}.
-However, prioritize memory (past successful choices) and your analysis of the user's explicit review history.
-The BPR model is just a hint - memory and review analysis are primary.
+Treat this as a helpful prior: items in this BPR top-5 that also match the user's preferences
+and memory signals should be ranked especially high.
 """
         else:
             bpr_guidance = ""
             bpr_ranking = None
 
-        # Step 8: Final ranking task using structured reasoning with memory
+        # Step 8: Final ranking task using structured reasoning with enhanced memory
         task_description = (
             "Rank the candidate products for this user based on their review history, "
-            "item attributes, memory of past successful choices, and collaborative filtering signals."
+            "summarized preferences, item attributes, memory of past similar successful trajectories, "
+            "and collaborative filtering signals."
         )
-        
+
         result = self.reasoning(
             task_description=task_description,
             merged_reviews=merged_reviews,
             readable_item_list=readable_item_list,
             candidate_ids=candidate_ids,
+            user_pref_summary=user_pref_summary,
             bpr_guidance=bpr_guidance,
             memory_guidance=memory_guidance
         )
@@ -444,14 +471,14 @@ The BPR model is just a hint - memory and review analysis are primary.
             else:
                 print("No list found.")
                 return bpr_ranking or ['']
-            
+
             parsed = ast.literal_eval(result)
             if not isinstance(parsed, list):
                 print("Parsed output is not a list.")
                 return bpr_ranking or ['']
-            
+
             parsed = [str(x) for x in parsed]
-            
+
             # Filter to valid candidate_ids and preserve order
             candidate_set = set(candidate_ids)
             cleaned = []
@@ -484,24 +511,24 @@ The BPR model is just a hint - memory and review analysis are primary.
                     rb = rank_b.get(cid, max_rank)
                     rm = rank_m.get(cid, max_rank)
                     rq = rank_q.get(cid, max_rank)
-                    
+
                     # Weighted combination:
-                    # - LLM reasoning remains primary
-                    # - BPR carries more influence
-                    # - Memory and intrinsic quality provide additional signals
+                    # - LLM reasoning + user preference summary remains primary
+                    # - Memory provides a strong secondary signal when present
+                    # - BPR and intrinsic quality provide additional signals
                     if memory_ranking and bpr_ranking:
-                        score = -(0.55 * rl + 0.25 * rb + 0.10 * rm + 0.10 * rq)
+                        score = -(0.55 * rl + 0.20 * rm + 0.15 * rb + 0.10 * rq)
                     elif memory_ranking:
-                        score = -(0.65 * rl + 0.20 * rm + 0.15 * rq)
+                        score = -(0.65 * rl + 0.25 * rm + 0.10 * rq)
                     elif bpr_ranking:
-                        score = -(0.65 * rl + 0.25 * rb + 0.10 * rq)
+                        score = -(0.70 * rl + 0.20 * rb + 0.10 * rq)
                     else:
                         score = -(0.80 * rl + 0.20 * rq)
-                    
+
                     combined.append((cid, score))
                 combined.sort(key=lambda x: x[1], reverse=True)
                 final_ranking = [cid for cid, _ in combined]
-                
+
                 if memory_ranking:
                     print(f"Memory ranking (top 5): {memory_ranking[:5]}")
             except Exception as e:
@@ -515,22 +542,19 @@ The BPR model is just a hint - memory and review analysis are primary.
                 try:
                     user_id = self.task.get("user_id")
                     top_choice = final_ranking[0] if final_ranking else None
-                    
-                    # Store 1: User's top choice (for future recommendations to same user)
-                    if top_choice:
-                        user_pattern = (
-                            f"user_id={user_id} successful top recommendation: {top_choice}. "
-                            f"This user strongly preferred {top_choice} when given candidates {candidate_ids[:5]}..."
-                        )
-                        self.memory(f"review:{user_pattern}")
-                    
-                    # Store 2: Full trajectory (for similar scenarios)
-                    trajectory_str = (
-                        f"User {user_id} recommendation: top choice was {top_choice}. "
-                        f"BPR model predicted {bpr_ranking[0] if bpr_ranking else 'N/A'}. "
-                        f"Top 5 ranking: {final_ranking[:5]}"
+
+                    # Scenario summary for memory (more structured, cross-user useful)
+                    scenario_memory_str = (
+                        f"user_pref: {user_pref_summary} | "
+                        f"user_id: {user_id} | "
+                        f"candidates: {candidate_ids} | "
+                        f"top_choice: {top_choice} | "
+                        f"top_5_ranking: {final_ranking[:5]} | "
+                        f"bpr_top_1: {bpr_ranking[0] if bpr_ranking else 'N/A'}"
                     )
-                    self.memory(f"review:{trajectory_str}")
+
+                    # Store: full trajectory summary for this scenario
+                    self.memory(f"review:{scenario_memory_str}")
                 except Exception as e:
                     logging.warning(f"Memory storage failed: {e}")
 
@@ -564,11 +588,13 @@ if __name__ == "__main__":
     # Run evaluation
     # If you don't set the number of tasks, the simulator will run all tasks.
     agent_outputs = simulator.run_simulation(
-        number_of_tasks=None, enable_threading=True, max_workers=10)
+        number_of_tasks=100, enable_threading=True, max_workers=10)
 
     # Evaluate the agent
     evaluation_results = simulator.evaluate()
-    with open(f'/srv/CS_245_Project/example/gemini_keith_memory_bpr_evaluation_results.json', 'w') as f:
+    with open(f'/srv/CS_245_Project/example/gemini_keith_memory_bpr_v2_evaluation_results.json', 'w') as f:
         json.dump(evaluation_results, f, indent=4)
 
     print(f"The evaluation_results is :{evaluation_results}")
+
+

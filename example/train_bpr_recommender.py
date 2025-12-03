@@ -16,16 +16,18 @@ logging.basicConfig(level=logging.INFO)
 
 # Configuration
 REVIEW_FILE = "/srv/output/data1/output/review.json"
-OUTPUT_FILE = "/srv/CS_245_Project/example/bpr_model.pkl"
+OUTPUT_FILE = "/srv/CS_245_Project/example/bpr_model1.pkl"
 
-# BPR hyperparameters
-FACTORS = 128  # Embedding dimension
-REGULARIZATION = 0.01  # L2 regularization
-ITERATIONS = 50  # Number of training iterations
-LEARNING_RATE = 0.05  # Learning rate
+# BPR hyperparameters (stricter / stronger training)
+# Slightly larger embedding, more iterations, stronger regularization.
+FACTORS = 256          # Embedding dimension
+REGULARIZATION = 0.05  # L2 regularization
+ITERATIONS = 150       # Number of training iterations
+LEARNING_RATE = 0.03   # Learning rate
 
-# Filter for positive interactions (ratings >= 4.0)
-MIN_RATING = 4.0
+# Filter for positive interactions
+# Treat only very positive reviews as implicit "likes"
+MIN_RATING = 4.0       # Keep 4 and 5 stars as positives
 
 
 def load_reviews():
@@ -54,7 +56,12 @@ def load_reviews():
                 
                 # Filter for positive interactions
                 if rating >= MIN_RATING:
-                    user_item_ratings[user_id].append((item_id, rating))
+                    # Map ratings to implicit weights: 5★ > 4★
+                    if rating >= 5.0:
+                        weight = 1.0
+                    else:  # 4-star
+                        weight = 0.6
+                    user_item_ratings[user_id].append((item_id, weight))
                     user_set.add(user_id)
                     item_set.add(item_id)
             except json.JSONDecodeError:
@@ -89,7 +96,7 @@ def build_interaction_matrix(user_item_ratings, user_list, item_list):
             item_idx = item_id_to_idx[item_id]
             rows.append(user_idx)
             cols.append(item_idx)
-            # Use rating as weight (or 1.0 for binary)
+            # Use precomputed implicit weight (already scaled)
             data.append(float(rating))
     
     # Create sparse matrix (user-item)

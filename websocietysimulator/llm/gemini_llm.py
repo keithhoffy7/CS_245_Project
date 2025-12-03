@@ -9,6 +9,30 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 import logging
 logger = logging.getLogger("websocietysimulator")
 
+
+class GeminiEmbeddings:
+    """
+    Minimal embedding wrapper so components like MemoryVoyager can call embed_documents/embed_query.
+    """
+
+    def __init__(self, api_key: str, model: str = "models/text-embedding-004"):
+        genai.configure(api_key=api_key)
+        self.model = model
+
+    def _embed(self, text: str) -> List[float]:
+        if not text:
+            text = ""
+        response = genai.embed_content(model=self.model, content=text)
+        # genai returns a dict with 'embedding' key
+        return response.get("embedding", [])
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        return [self._embed(text) for text in texts]
+
+    def embed_query(self, text: str) -> List[float]:
+        return self._embed(text)
+
+
 class GeminiLLM(LLMBase):
     def __init__(self, api_key: str, model: str = "gemini-2.0-flash"):
         """
@@ -23,6 +47,7 @@ class GeminiLLM(LLMBase):
         self.api_key = api_key
         self.model_name = model
         self.client = genai.GenerativeModel(model)
+        self.embedding_model = GeminiEmbeddings(api_key=api_key)
     
     @retry(
         retry=retry_if_exception_type(Exception),
@@ -95,5 +120,4 @@ class GeminiLLM(LLMBase):
             raise e
     
     def get_embedding_model(self):
-        # Return None - embeddings are handled directly with genai.embed_content
-        return None
+        return self.embedding_model

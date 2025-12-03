@@ -5,6 +5,7 @@ from langchain.docstore.document import Document
 import shutil
 import uuid
 
+
 class MemoryBase:
     def __init__(self, memory_type: str, llm) -> None:
         """
@@ -16,12 +17,15 @@ class MemoryBase:
         """
         self.llm = llm
         self.embedding = self.llm.get_embedding_model()
-        db_path = os.path.join('./db', memory_type, f'{str(uuid.uuid4())}')
-        if os.path.exists(db_path):
-            shutil.rmtree(db_path)
+
+        # Use a stable, shared path per memory type so memories persist across
+        # agent instances/tasks instead of being isolated by random UUID, and
+        # rely on langchain-chroma's default embedded Chroma client.
+        db_path = os.path.join("./db", memory_type)
+
         self.scenario_memory = Chroma(
             embedding_function=self.embedding,
-            persist_directory=db_path
+            persist_directory=db_path,
         )
 
     def __call__(self, current_situation: str = ''):
