@@ -38,10 +38,11 @@ def load_bpr_model() -> Optional[Dict]:
     return None
 
 
-def get_bpr_ranking(user_id: str, candidate_ids: List[str]) -> Optional[List[str]]:
+def get_bpr_ranking(user_id: str, candidate_ids: List[str], return_scores: bool = False):
     """
     Get BPR ranking for candidates.
     Returns ranking list or None if model/user not available.
+    If return_scores=True, returns tuple (ranking, scores_dict) where scores_dict maps item_id -> score.
     """
     model = load_bpr_model()
     if model is None:
@@ -79,12 +80,18 @@ def get_bpr_ranking(user_id: str, candidate_ids: List[str]) -> Optional[List[str
     scored = list(zip([cid for cid, _ in existing], scores))
     scored.sort(key=lambda x: x[1], reverse=True)
     ranked = [cid for cid, _ in scored]
+    
+    # Create scores dictionary
+    scores_dict = {cid: float(score) for cid, score in scored}
 
-    # Append missing candidates at the end
+    # Append missing candidates at the end (with None score)
     for cid in candidate_ids:
         if cid not in ranked:
             ranked.append(cid)
+            scores_dict[cid] = None
 
+    if return_scores:
+        return ranked, scores_dict
     return ranked
 
 
@@ -109,9 +116,24 @@ class MyRecommendationAgent(RecommendationAgent):
         candidate_ids = self.task['candidate_list']
         user_id = self.task['user_id']
 
-        bpr_ranking = get_bpr_ranking(user_id, candidate_ids)
-        if bpr_ranking:
-            print(f"BPR ranking (top 10): {bpr_ranking[:10]}")
+        result = get_bpr_ranking(user_id, candidate_ids, return_scores=True)
+        if result:
+            bpr_ranking, scores_dict = result
+            
+            # Print BPR scores for all candidates
+            print(f"\n{'='*80}")
+            print(f"User: {user_id}")
+            print(f"BPR Scores (sorted by score, descending):")
+            print(f"{'='*80}")
+            sorted_by_score = sorted(scores_dict.items(), key=lambda x: x[1] if x[1] is not None else float('-inf'), reverse=True)
+            for rank, (item_id, score) in enumerate(sorted_by_score[:20], 1):
+                if score is not None:
+                    print(f"  {rank:2d}. {item_id}: {score:8.4f}")
+                else:
+                    print(f"  {rank:2d}. {item_id}: (not in BPR model)")
+            print(f"{'='*80}")
+            print(f"BPR ranking (top 10): {bpr_ranking[:10]}\n")
+            
             return bpr_ranking
 
         # Fallback: if no BPR ranking available, just return candidates as-is
@@ -143,7 +165,7 @@ if __name__ == "__main__":
 
     # Run evaluation
     agent_outputs = simulator.run_simulation(
-        number_of_tasks=None, enable_threading=True, max_workers=10)
+        number_of_tasks=1, enable_threading=True, max_workers=10)
 
     # Evaluate the agent
     evaluation_results = simulator.evaluate()

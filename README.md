@@ -1,225 +1,120 @@
-<div style="text-align: center; display: flex; align-items: center; justify-content: center; background-color: white; padding: 20px; border-radius: 30px;">
-  <img src="./static/ASC.jpg" alt="AgentSociety Challenge Logo" width="100" style="margin-right: 20px; border-radius: 10%;">
-  <h1 style="color: black; margin: 0; font-size: 2em;">WWW'25 AgentSociety Challenge: WebSocietySimulator</h1>
-</div>
+# Example Agents - Setup and Usage Guide
 
-# 🚀 AgentSociety Challenge
-![License](https://img.shields.io/badge/license-MIT-green) &ensp;
-[![Competition Link](https://img.shields.io/badge/competition-link-orange)](https://www.codabench.org/competitions/4574/) &ensp;
-[![arXiv](https://img.shields.io/badge/arXiv-2502.18754-b31b1b.svg)](https://arxiv.org/abs/2502.18754)
+This project contains different recommendation agents that can be used with the Web Society Simulator. This guide will help you set up and run these agents.
 
-Welcome to the **WWW'25 AgentSociety Challenge**! This repository provides the tools and framework needed to participate in a competition that focuses on building **LLM Agents** for **user behavior simulation** and **recommendation systems** based on open source datasets.
+## Installing Dependencies
 
-Participants are tasked with developing intelligent agents that interact with a simulated environment and perform specific tasks in two competition tracks:
-1. **User Behavior Simulation Track**: Agents simulate user behavior, including generating reviews and ratings.
-2. **Recommendation Track**: Agents generate recommendations based on provided contextual data.
+You can install all dependencies using `pip`:
 
-This repository includes:
-- The core library `websocietysimulator` for environment simulation.
-- Scripts for dataset processing and analysis.
-- Example usage for creating and evaluating agents.
-
----
-
-## Directory Structure
-
-### 1. **`websocietysimulator/`**  
-This is the core library containing all source code required for the competition.
-
-- **`agents/`**: Contains base agent classes (`SimulationAgent`, `RecommendationAgent`) and their abstractions. Participants must extend these classes for their implementations.
-- **`task/`**: Defines task structures for each track (`SimulationTask`, `RecommendationTask`).
-- **`llm/`**: Contains base LLM client classes (`DeepseekLLM`, `OpenAILLM`).
-- **`tools/`**: Includes utility tools:
-  - `InteractionTool`: A utility for interacting with the Yelp dataset during simulations.
-  - `EvaluationTool`: Provides comprehensive metrics for both recommendation (HR@1/3/5) and simulation tasks (RMSE, sentiment analysis).
-- **`simulator.py`**: The main simulation framework, which handles task and groundtruth setting, evaluation and agent execution.
-
-### 2. **`example/`**  
-Contains usage examples of the `websocietysimulator` library. Includes sample agents and scripts to demonstrate how to load scenarios, set agents, and evaluate them.
-
-### 3. **`data_process.py`**  
-A script to process the raw Yelp dataset into the required format for use with the `websocietysimulator` library. This script ensures the dataset is cleaned and structured correctly for simulations.
-
----
-
-## Quick Start
-
-### 1. Install the Library
-
-The repository is organized using [Python Poetry](https://python-poetry.org/). Follow these steps to install the library:
-
-1. Clone the repository:
-   ```bash
-   git clone <this_repo>
-   cd websocietysimulator
-   ```
-
-2. Install dependencies:
-  - Option 1: Install dependencies using Poetry: (Recommended)
-    ```bash
-    poetry install  && \
-    poetry shell
-    ```
-  - Option 2: Install dependencies using pip(COMING SOON):
-    ```bash
-    pip install websocietysimulator
-    ```
-  - Option 3: Install dependencies using conda:
-    ```bash
-    conda create -n websocietysimulator python=3.11 && \
-    conda activate websocietysimulator && \
-    pip install -r requirements.txt && \
-    pip install .
-    ```
-
-3. Verify the installation:
-   ```python
-   import websocietysimulator
-   ```
-
----
-
-### 2. Data Preparation
-
-1. Download the raw dataset from the Yelp[1], Amazon[2] or Goodreads[3].
-2. Run the `data_process.py` script to process the dataset:
-   ```bash
-   python data_process.py --input <path_to_raw_dataset> --output <path_to_processed_dataset>
-   ```
-- Check out the [Data Preparation Guide](./tutorials/data_preparation.md) for more information.
-- **NOTICE: You Need at least 16GB RAM to process the dataset.**
-
----
-
-### 3. Organize Your Data
-
-Ensure the dataset is organized in a directory structure similar to this:
-
-```
-<your_dataset_directory>/
-├── item.json
-├── review.json
-├── user.json
+```bash
+pip install websocietysimulator
 ```
 
-You can name the dataset directory whatever you prefer (e.g., `dataset/`).
+```bash
+pip install -e .
+```
 
----
+## API Keys Setup
 
-### 4. Develop Your Agent
+The agents require API keys for the LLMs they use. Most of the agents use Gemini, but we also have a baseline agent using GPT. Set these as environment variables before running the agents.
 
-Create a custom agent by extending either `SimulationAgent` or `RecommendationAgent`. Refer to the examples in the `example/` directory. Here's a quick template:
+### Gemini API Key
+
+For agents using Gemini (most agents in this folder):
+
+```bash
+export GEMINI_API_KEY="your-gemini-api-key-here"
+```
+
+The above will temporarily set the environment variable for your current terminal instance. To permanently set the environment variable:
+
+```bash
+echo 'export GEMINI_API_KEY="your-gemini-api-key-here"' >> ~/.bashrc
+```
+
+Restart your terminal after the above command.
+
+### OpenAI API Key
+
+For agents using GPT (only the base agent):
+
+```bash
+export OPENAI_API_KEY="your-openai-api-key-here"
+```
+
+The above will temporarily set the environment variable for your current terminal instance. To permanently set the environment variable:
+
+```bash
+echo 'export OPENAI_API_KEY="your-openai-api-key-here"' >> ~/.bashrc
+```
+
+Restart your terminal after the above command.
+
+## Data Setup
+
+### 1. Process Raw Data
+
+Before running the agents, you need to process the raw datasets. The processed data should be placed in a directory that the simulator can access. Our agents were created and tested using the amazon dataset, so these are the instructions for processing that data:
+
+**Required data files:**
+- `item.json` - Processed item data
+- `review.json` - Processed review data
+- `user.json` - Processed user data
+
+**Processing the data:**
+
+Ensure you are in the `/CS_245_Project` directory to begin. Then follow these steps:
+
+```bash
+python data_process.py --input_dir <path_to_raw_datasets> --output_dir <path_to_processed_output>
+```
+
+**Required raw data files:**
+- **Amazon**: 
+   - `Industrial_and_Scientific.csv`, 
+   - `Musical_Instruments.csv`, 
+   - `Video_Games.csv`,
+   - `Industrial_and_Scientific.jsonl`, 
+   - `Musical_Instruments.jsonl`, 
+   - `Video_Games.jsonl`,
+   - `meta_Industrial_and_Scientific.jsonl`, 
+   - `meta_Musical_Instruments.jsonl`, 
+   - `meta_Video_Games.jsonl`
+
+See `/tutorials/data_preparation.md` for more detailed data preparation instructions.
+
+### 2. Data Directory Path
+
+The agents expect the processed data to be at `/srv/output/data1/output` because this is where we kept the data on our virtual machine we used for testing. If your data is in a different location, you'll need to modify the `data_dir` parameter in ALLL the agent scripts:
 
 ```python
-from yelpsimulator.agents.simulation_agent import SimulationAgent
-
-class MySimulationAgent(SimulationAgent):
-    def workflow(self):
-        # The simulator will automatically set the task for your agent. You can access the task by `self.task` to get task information.
-        print(self.task)
-
-        # You can also use the `interaction_tool` to get data from the dataset.
-        # For example, you can get the user information by `interaction_tool.get_user(user_id="example_user_id")`.
-        # You can also get the item information by `interaction_tool.get_item(item_id="example_item_id")`.
-        # You can also get the reviews by `interaction_tool.get_reviews(review_id="example_review_id")`.
-        user_info = interaction_tool.get_user(user_id="example_user_id")
-
-        # Implement your logic here
-        
-        # Finally, you need to return the result in the format of `stars` and `review`.
-        # For recommendation track, you need to return a candidate list of items, in which the first item is the most recommended item.
-        stars = 4.0
-        review = "Great experience!"
-        return stars, review
+simulator = Simulator(data_dir="/path/to/your/processed/data", device="auto", cache=False)
 ```
 
-- Check out the [Tutorial](./tutorials/agent_development.md) for Agent Development.
-- Baseline User Behavior Simulation Agent: [Baseline User Behavior Simulation Agent](./example/ModelingAgent_baseline.py).
-- Baseline Recommendation Agent: [Baseline Recommendation Agent](./example/RecAgent_baseline.py).
----
+### 3. Task and Groundtruth Files
 
-### 5. Evaluation your agent with training data
+The agents also need task files and groundtruth files to run the sumulation. These are located in:
+- `/example/track1` - Track 1 tasks (amazon, goodreads, yelp)
+- `/example/track2` - Track 2 tasks (amazon, goodreads, yelp)
 
-Run the simulation using the provided `Simulator` class:
+Each dataset folder contains:
+- `/tasks` - Task definition files
+- `/groundtruth` - Groundtruth ranking files
+
+These paths in the agent scripts are absolute paths from the virtual machine we used for testing. You will need to update them to the absolute path on your machine. Or, you can use the relative path (but then you have to run the agents from inside the `/example` folder):
 
 ```python
-from websocietysimulator import Simulator
-from my_agent import MySimulationAgent
-
-# Initialize Simulator
-simulator = Simulator(data_dir="path/to/your/dataset", device="auto", cache=False)
-# The cache parameter controls whether to use cache for interaction tool.
-# If you want to use cache, you can set cache=True. When using cache, the simulator will only load data into memory when it is needed, which saves a lot of memory.
-# If you want to use normal interaction tool, you can set cache=False. Notice that, normal interaction tool will load all data into memory at the beginning, which needs a lot of memory (20GB+).
-
-# Load scenarios
-simulator.set_task_and_groundtruth(task_dir="path/to/task_directory", groundtruth_dir="path/to/groundtruth_directory")
-
-# Set your custom agent
-simulator.set_agent(MySimulationAgent)
-
-# Set LLM client
-simulator.set_llm(DeepseekLLM(api_key="Your API Key"))
-
-# Run evaluation
-# If you don't set the number of tasks, the simulator will run all tasks.
-agent_outputs = simulator.run_simulation(number_of_tasks=None, enable_threading=True, max_workers=10)
-
-# Evaluate the agent
-evaluation_results = simulator.evaluate()
+simulator.set_task_and_groundtruth(task_dir=f"./track2/{task_set}/tasks", groundtruth_dir=f"./track2/{task_set}/groundtruth")
 ```
-- If you want to use your own LLMClient, you can easily implement it by inheriting the `LLMBase` class. Refer to the [Tutorial](./tutorials/agent_development.md) for more information.
 
----
+Also ensure that `task_set` is set to "amazon" (should be already set in all our agents).
 
-### 6. Submit your agent
-- You should register your team firstly in the competition homepage ([Homepage](https://tsinghua-fib-lab.github.io/AgentSocietyChallenge)).
-- Submit your solution through the submission button at the specific track page. (the submission button is at the top right corner of the page)
-  - [User Modeling Track](https://tsinghua-fib-lab.github.io/AgentSocietyChallenge/pages/behavior-track.html)
-  - [Recommendation Track](https://tsinghua-fib-lab.github.io/AgentSocietyChallenge/pages/recommendation-track.html)
-  - Please register your team first.
-  - When you submit your agent, please carefully **SELECT the TRACK you want to submit to.**
-- **The content of your submission should be a .py file containing your agent (Only one `{your_team}.py` file without evaluation code).**
-- Example submissions:
-  - For Track 1: [submission_1](example/trackOneSubmission_example.zip)
-  - For Track 2: [submission_2](example/trackTwoSubmission_example.zip)
+## Running the Agents
 
----
+You can run the agents by simply running the python script containing the agent. The names correspond to what advanced strategies were used fo rthat agent (unless it is a base agent). For example, to run the Gemini Baseline Agent:
 
-## Introduction to the `InteractionTool`
+```bash
+python3 gemini_base_agent.py
+```
 
-The `InteractionTool` is the core utility for interacting with the dataset. It provides an interface for querying user, item, and review data.
-
-### Functions
-
-- **Get User Information**:
-  Retrieve user data by user ID or current scenario context.
-  ```python
-  user_info = interaction_tool.get_user(user_id="example_user_id")
-  ```
-
-- **Get Item Information**:
-  Retrieve item data by item ID or current scenario context.
-  ```python
-  item_info = interaction_tool.get_item(item_id="example_item_id")
-  ```
-
-- **Get Reviews**:
-  Fetch reviews related to a specific item or user, filtered by time.
-  ```python
-  reviews = interaction_tool.get_reviews(review_id="example_review_id")  # Fetch a specific review
-  reviews = interaction_tool.get_reviews(item_id="example_item_id")  # Fetch all reviews for a specific item
-  reviews = interaction_tool.get_reviews(user_id="example_user_id")  # Fetch all reviews for a specific user
-  ```
-
-## License
-
-This project is licensed under the MIT License. See the `LICENSE` file for details.
-
-## References
-
-[1] Yelp Dataset: https://www.yelp.com/dataset
-
-[2] Amazon Dataset: https://amazon-reviews-2023.github.io/
-
-[3] Goodreads Dataset: https://sites.google.com/eng.ucsd.edu/ucsdbookgraph/home
+Note that the agents allow you to configure certain parameters when running them, such as the number of workers running the tasks and how many tasks to execute. For the OpenAI base agent we had to set the number of workers to 2 to prevent too many requests per minute.
