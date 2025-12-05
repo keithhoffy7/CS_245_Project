@@ -38,7 +38,7 @@ def load_bpr_model() -> Optional[Dict]:
     global _bpr_model_cache
     if _bpr_model_cache is not None:
         return _bpr_model_cache
-    
+
     if os.path.exists(BPR_MODEL_PATH):
         try:
             with open(BPR_MODEL_PATH, "rb") as f:
@@ -47,7 +47,7 @@ def load_bpr_model() -> Optional[Dict]:
             return _bpr_model_cache
         except Exception as e:
             logging.warning("Failed to load BPR model: %s", e)
-    
+
     logging.warning("BPR model not found. Using LLM-only ranking.")
     _bpr_model_cache = None
     return None
@@ -113,9 +113,9 @@ class RecReasoning(ReasoningBase):
         """Initialize the reasoning module"""
         super().__init__(profile_type_prompt=profile_type_prompt, memory=memory, llm=llm)
 
-    def create_prompt(self, task_description: str, merged_reviews: str, 
-                     readable_item_list: str, candidate_ids: List[str],
-                     bpr_guidance: str = "", memory_guidance: str = "") -> str:
+    def create_prompt(self, task_description: str, merged_reviews: str,
+                      readable_item_list: str, candidate_ids: List[str],
+                      bpr_guidance: str = "", memory_guidance: str = "") -> str:
         """
         Create a structured reasoning prompt for Amazon-style product recommendations.
         Similar to RecPlanning.create_prompt - very specific and emphasizes USER/ITEM/REVIEW.
@@ -243,7 +243,8 @@ class MyRecommendationAgent(RecommendationAgent):
         super().__init__(llm=llm)
         # Add MemoryVoyager for storing and retrieving past successful recommendations
         self.memory = MemoryVoyager(llm=self.llm)
-        self.reasoning = RecReasoning(profile_type_prompt='', llm=self.llm, memory=self.memory)
+        self.reasoning = RecReasoning(
+            profile_type_prompt='', llm=self.llm, memory=self.memory)
 
     def workflow(self):
         """
@@ -267,7 +268,8 @@ class MyRecommendationAgent(RecommendationAgent):
             # Simple quality heuristic to favor strong, well-reviewed items
             avg_rating = item.get("average_rating", 0) or 0
             rating_count = item.get("rating_number", 0) or 0
-            item_quality_scores[item['item_id']] = avg_rating * np.log1p(rating_count)
+            item_quality_scores[item['item_id']
+                                ] = avg_rating * np.log1p(rating_count)
 
         # Step 2: Get user's review history
         history_review_dict = self.interaction_tool.get_reviews(
@@ -308,20 +310,21 @@ class MyRecommendationAgent(RecommendationAgent):
                 # Query 1: Look for this specific user's past successful choices
                 user_query = f"user_id={self.task['user_id']} successful top recommendation"
                 user_memory = self.memory(user_query)
-                
+
                 # Query 2: Look for similar recommendation scenarios
                 scenario_query = (
                     f"recommendation task; user_id={self.task['user_id']}; "
-                    f"candidates={self.task['candidate_list'][:5]}..."  # First 5 for similarity
+                    # First 5 for similarity
+                    f"candidates={self.task['candidate_list'][:5]}..."
                 )
                 scenario_memory = self.memory(scenario_query)
-                
+
                 # Combine memories
                 if user_memory:
                     memory_context += f"Past successful choices for this user:\n{user_memory}\n\n"
                 if scenario_memory:
                     memory_context += f"Similar recommendation scenarios:\n{scenario_memory}\n\n"
-                    
+
                 # Extract top choices from memory if available
                 if user_memory:
                     # Try to extract item IDs from memory text
@@ -335,7 +338,7 @@ class MyRecommendationAgent(RecommendationAgent):
         # Build memory guidance block (subtle, not prescriptive)
         memory_guidance = ""
         memory_ranking = None  # Will be used in rank fusion
-        
+
         # Extract memory items from both memory_context and user_top_choices
         memory_items = []
         if user_top_choices:
@@ -345,14 +348,16 @@ class MyRecommendationAgent(RecommendationAgent):
             item_pattern = r'B[A-Z0-9]{9}'  # Amazon ASIN pattern
             found_items = re.findall(item_pattern, memory_context)
             memory_items = found_items[:5]  # Top 5 from memory
-        
+
         # Create memory-based ranking if we have memory items in candidates
         if memory_items:
-            memory_items_in_candidates = [cid for cid in memory_items if cid in candidate_ids]
+            memory_items_in_candidates = [
+                cid for cid in memory_items if cid in candidate_ids]
             if memory_items_in_candidates:
                 # Memory items first, then rest (but this is just for rank fusion, not forced)
-                memory_ranking = memory_items_in_candidates + [cid for cid in candidate_ids if cid not in memory_items_in_candidates]
-        
+                memory_ranking = memory_items_in_candidates + \
+                    [cid for cid in candidate_ids if cid not in memory_items_in_candidates]
+
         # Build guidance text
         if memory_context:
             memory_guidance = (
@@ -389,7 +394,8 @@ class MyRecommendationAgent(RecommendationAgent):
 
         # Simple LLM call for merging reviews
         messages_merge = [{"role": "user", "content": merged_reviews_prompt}]
-        merged_reviews = self.llm(messages=messages_merge, temperature=0.1, max_tokens=4000)
+        merged_reviews = self.llm(
+            messages=messages_merge, temperature=0.1, max_tokens=4000)
 
         # Step 6: Make candidate item list readable (Keith's approach)
         readable_item_list_prompt = f'''
@@ -402,8 +408,10 @@ class MyRecommendationAgent(RecommendationAgent):
         '''
 
         # Simple LLM call for making items readable
-        messages_readable = [{"role": "user", "content": readable_item_list_prompt}]
-        readable_item_list = self.llm(messages=messages_readable, temperature=0.1, max_tokens=4000)
+        messages_readable = [
+            {"role": "user", "content": readable_item_list_prompt}]
+        readable_item_list = self.llm(
+            messages=messages_readable, temperature=0.1, max_tokens=4000)
 
         # Step 7: Get BPR model ranking
         bpr_ranking = get_bpr_ranking(self.task['user_id'], candidate_ids)
@@ -426,7 +434,7 @@ The BPR model is just a hint - memory and review analysis are primary.
             "Rank the candidate products for this user based on their review history, "
             "item attributes, memory of past successful choices, and collaborative filtering signals."
         )
-        
+
         result = self.reasoning(
             task_description=task_description,
             merged_reviews=merged_reviews,
@@ -444,14 +452,14 @@ The BPR model is just a hint - memory and review analysis are primary.
             else:
                 print("No list found.")
                 return bpr_ranking or ['']
-            
+
             parsed = ast.literal_eval(result)
             if not isinstance(parsed, list):
                 print("Parsed output is not a list.")
                 return bpr_ranking or ['']
-            
+
             parsed = [str(x) for x in parsed]
-            
+
             # Filter to valid candidate_ids and preserve order
             candidate_set = set(candidate_ids)
             cleaned = []
@@ -467,9 +475,12 @@ The BPR model is just a hint - memory and review analysis are primary.
             # Combine LLM, BPR, Memory, and intrinsic quality rankings (rank fusion)
             final_ranking = cleaned
             try:
-                rank_l = {cid: i for i, cid in enumerate(cleaned)}  # LLM ranking
-                rank_b = {cid: i for i, cid in enumerate(bpr_ranking)} if bpr_ranking else {}
-                rank_m = {cid: i for i, cid in enumerate(memory_ranking)} if memory_ranking else {}
+                rank_l = {cid: i for i, cid in enumerate(
+                    cleaned)}  # LLM ranking
+                rank_b = {cid: i for i, cid in enumerate(
+                    bpr_ranking)} if bpr_ranking else {}
+                rank_m = {cid: i for i, cid in enumerate(
+                    memory_ranking)} if memory_ranking else {}
                 # Quality ranking (higher quality = better rank)
                 quality_sorted = sorted(
                     candidate_ids,
@@ -484,24 +495,25 @@ The BPR model is just a hint - memory and review analysis are primary.
                     rb = rank_b.get(cid, max_rank)
                     rm = rank_m.get(cid, max_rank)
                     rq = rank_q.get(cid, max_rank)
-                    
+
                     # Weighted combination:
                     # - LLM reasoning remains primary
                     # - BPR carries more influence
                     # - Memory and intrinsic quality provide additional signals
                     if memory_ranking and bpr_ranking:
-                        score = -(0.55 * rl + 0.25 * rb + 0.10 * rm + 0.10 * rq)
+                        score = -(0.55 * rl + 0.25 * rb +
+                                  0.10 * rm + 0.10 * rq)
                     elif memory_ranking:
                         score = -(0.65 * rl + 0.20 * rm + 0.15 * rq)
                     elif bpr_ranking:
                         score = -(0.65 * rl + 0.25 * rb + 0.10 * rq)
                     else:
                         score = -(0.80 * rl + 0.20 * rq)
-                    
+
                     combined.append((cid, score))
                 combined.sort(key=lambda x: x[1], reverse=True)
                 final_ranking = [cid for cid, _ in combined]
-                
+
                 if memory_ranking:
                     print(f"Memory ranking (top 5): {memory_ranking[:5]}")
             except Exception as e:
@@ -515,7 +527,7 @@ The BPR model is just a hint - memory and review analysis are primary.
                 try:
                     user_id = self.task.get("user_id")
                     top_choice = final_ranking[0] if final_ranking else None
-                    
+
                     # Store 1: User's top choice (for future recommendations to same user)
                     if top_choice:
                         user_pattern = (
@@ -523,7 +535,7 @@ The BPR model is just a hint - memory and review analysis are primary.
                             f"This user strongly preferred {top_choice} when given candidates {candidate_ids[:5]}..."
                         )
                         self.memory(f"review:{user_pattern}")
-                    
+
                     # Store 2: Full trajectory (for similar scenarios)
                     trajectory_str = (
                         f"User {user_id} recommendation: top choice was {top_choice}. "
@@ -568,7 +580,7 @@ if __name__ == "__main__":
 
     # Evaluate the agent
     evaluation_results = simulator.evaluate()
-    with open(f'/srv/CS_245_Project/example/gemini_keith_memory_bpr_evaluation_results.json', 'w') as f:
+    with open(f'/srv/CS_245_Project/example/gemini_planning_context_bpr_memory_reasoning_agent_evaluation_results.json', 'w') as f:
         json.dump(evaluation_results, f, indent=4)
 
     print(f"The evaluation_results is :{evaluation_results}")

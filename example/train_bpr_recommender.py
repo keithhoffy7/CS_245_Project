@@ -1,8 +1,3 @@
-"""
-Train a Bayesian Personalized Ranking (BPR) model for recommendation.
-BPR is optimized for ranking tasks with implicit feedback.
-"""
-
 import json
 import pickle
 import numpy as np
@@ -14,27 +9,22 @@ import logging
 
 logging.basicConfig(level=logging.INFO)
 
-# Configuration
-REVIEW_FILE = "/srv/output/data1/output/review.json"
-OUTPUT_FILE = "/srv/CS_245_Project/example/bpr_model1.pkl"
+REVIEW_FILE = "/srv/output/data1/output/review.json" # need to update as needed
+OUTPUT_FILE = "/srv/CS_245_Project/example/bpr_model.pkl"
 
-# BPR hyperparameters (stricter / stronger training)
-# Slightly larger embedding, more iterations, stronger regularization.
-FACTORS = 256          # Embedding dimension
-REGULARIZATION = 0.05  # L2 regularization
-ITERATIONS = 150       # Number of training iterations
-LEARNING_RATE = 0.03   # Learning rate
+FACTORS = 256 
+REGULARIZATION = 0.05
+ITERATIONS = 150 
+LEARNING_RATE = 0.03
 
-# Filter for positive interactions
-# Treat only very positive reviews as implicit "likes"
-MIN_RATING = 4.0       # Keep 4 and 5 stars as positives
+# filter for positive interactions
+MIN_RATING = 4.0 
 
 
 def load_reviews():
-    """Load reviews and filter for positive interactions."""
     logging.info(f"Loading reviews from {REVIEW_FILE}...")
     
-    user_item_ratings = defaultdict(list)  # user_id -> [(item_id, rating), ...]
+    user_item_ratings = defaultdict(list) 
     user_set = set()
     item_set = set()
     
@@ -56,10 +46,9 @@ def load_reviews():
                 
                 # Filter for positive interactions
                 if rating >= MIN_RATING:
-                    # Map ratings to implicit weights: 5★ > 4★
                     if rating >= 5.0:
                         weight = 1.0
-                    else:  # 4-star
+                    else: 
                         weight = 0.6
                     user_item_ratings[user_id].append((item_id, weight))
                     user_set.add(user_id)
@@ -74,7 +63,6 @@ def load_reviews():
 
 
 def build_interaction_matrix(user_item_ratings, user_list, item_list):
-    """Build sparse user-item interaction matrix."""
     logging.info("Building interaction matrix...")
     
     user_id_to_idx = {user_id: idx for idx, user_id in enumerate(user_list)}
@@ -96,10 +84,9 @@ def build_interaction_matrix(user_item_ratings, user_list, item_list):
             item_idx = item_id_to_idx[item_id]
             rows.append(user_idx)
             cols.append(item_idx)
-            # Use precomputed implicit weight (already scaled)
             data.append(float(rating))
     
-    # Create sparse matrix (user-item)
+    # create matrix
     matrix = csr_matrix((data, (rows, cols)), shape=(len(user_list), len(item_list)))
     
     logging.info(f"Matrix shape: {matrix.shape}, non-zero entries: {matrix.nnz}")
@@ -108,12 +95,11 @@ def build_interaction_matrix(user_item_ratings, user_list, item_list):
 
 
 def train_bpr_model(matrix):
-    """Train BPR model using implicit library."""
     logging.info("Training BPR model...")
     logging.info(f"Hyperparameters: factors={FACTORS}, regularization={REGULARIZATION}, "
                  f"iterations={ITERATIONS}, learning_rate={LEARNING_RATE}")
     
-    # Initialize BPR model
+    # initialize BPR model
     model = implicit.bpr.BayesianPersonalizedRanking(
         factors=FACTORS,
         regularization=REGULARIZATION,
@@ -122,10 +108,8 @@ def train_bpr_model(matrix):
         num_threads=4
     )
     
-    # Train the model
-    # Note: implicit expects item-user matrix (transposed)
-    # But BPR internally handles this correctly
-    model.fit(matrix.T)  # Transpose to item-user format (as implicit expects)
+    # train the model
+    model.fit(matrix)
     
     logging.info("Training completed!")
     
@@ -133,23 +117,10 @@ def train_bpr_model(matrix):
 
 
 def extract_factors(model, user_list, item_list):
-    """
-    Extract user and item factors from the trained model.
-    
-    IMPORTANT: implicit.bpr uses confusing naming:
-    - When you pass item-user matrix (transposed), model.user_factors are actually ITEM factors
-    - And model.item_factors are actually USER factors
-    So we need to swap them!
-    """
     logging.info("Extracting factors...")
     
-    # IMPORTANT: Due to implicit's naming convention when using transposed matrix:
-    # model.user_factors are actually item factors (because we passed item-user matrix)
-    # model.item_factors are actually user factors
-    # So we swap them to match our user-item convention
-    
-    item_factors = model.user_factors  # Actually item factors (confusing naming!)
-    user_factors = model.item_factors  # Actually user factors (confusing naming!)
+    user_factors = model.user_factors
+    item_factors = model.item_factors
     
     logging.info(f"User factors shape: {user_factors.shape}")
     logging.info(f"Item factors shape: {item_factors.shape}")
@@ -161,21 +132,21 @@ def main():
     """Main training pipeline."""
     logging.info("Starting BPR model training...")
     
-    # Step 1: Load reviews
+    # load reviews
     user_item_ratings, user_list, item_list = load_reviews()
     
-    # Step 2: Build interaction matrix
+    # build interaction matrix
     matrix, user_id_to_idx, item_id_to_idx = build_interaction_matrix(
         user_item_ratings, user_list, item_list
     )
     
-    # Step 3: Train BPR model
+    # train model
     model = train_bpr_model(matrix)
     
-    # Step 4: Extract factors (with correct swapping)
+    # extract factors
     user_factors, item_factors = extract_factors(model, user_list, item_list)
     
-    # Step 5: Save model
+    # save model
     model_dict = {
         "user_factors": user_factors,
         "item_factors": item_factors,

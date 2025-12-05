@@ -193,7 +193,7 @@ if __name__ == "__main__":
 
     # Evaluate the agent
     evaluation_results = simulator.evaluate()
-    with open(f'/srv/CS_245_Project/example/gemini_keith_agent_evaluation_results.json', 'w') as f:
+    with open(f'/srv/CS_245_Project/example/gemini_planning_context_agent_evaluation_results.json', 'w') as f:
         json.dump(evaluation_results, f, indent=4)
 
     print(f"The evaluation_results is :{evaluation_results}")

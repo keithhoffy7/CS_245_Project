@@ -111,10 +111,18 @@ Also ensure that `task_set` is set to "amazon" (should be already set in all our
 
 ## Running the Agents
 
-You can run the agents by simply running the python script containing the agent. The names correspond to what advanced strategies were used fo rthat agent (unless it is a base agent). For example, to run the Gemini Baseline Agent:
+You can run the agents by simply running the python script containing the agent. The names correspond to what advanced strategies were used for that agent (unless it is a base agent). For example, to run the Gemini Baseline Agent:
 
 ```bash
 python3 gemini_base_agent.py
 ```
 
 Note that the agents allow you to configure certain parameters when running them, such as the number of workers running the tasks and how many tasks to execute. For the OpenAI base agent we had to set the number of workers to 2 to prevent too many requests per minute.
+
+## Project Notes
+
+1. We cloned the original AgentSociety Challenge GitHub repository and added our own commits with our improved agents to the repository. 
+
+2. All of our group members were working on the project in the same cloned repository in a GCP virtual machine, so most of the commits are from the same user (Kriteen Jain).
+
+3. We used various LLM tools to suggest strategies to improve our agents.

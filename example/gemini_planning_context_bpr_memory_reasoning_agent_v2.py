@@ -261,7 +261,8 @@ class MyRecommendationAgent(RecommendationAgent):
         super().__init__(llm=llm)
         # Add MemoryVoyager for storing and retrieving past successful recommendations
         self.memory = MemoryVoyager(llm=self.llm)
-        self.reasoning = RecReasoning(profile_type_prompt='', llm=self.llm, memory=self.memory)
+        self.reasoning = RecReasoning(
+            profile_type_prompt='', llm=self.llm, memory=self.memory)
 
     def _summarize_user_preferences(self, history_review: str) -> str:
         """Use LLM to summarize user preferences from raw review dict text."""
@@ -303,7 +304,8 @@ Your output should be a concise paragraph or bullet list (no more than 4 sentenc
             # Simple quality heuristic to favor strong, well-reviewed items
             avg_rating = item.get("average_rating", 0) or 0
             rating_count = item.get("rating_number", 0) or 0
-            item_quality_scores[item['item_id']] = avg_rating * np.log1p(rating_count)
+            item_quality_scores[item['item_id']
+                                ] = avg_rating * np.log1p(rating_count)
 
         # Step 2: Get user's review history
         history_review_dict = self.interaction_tool.get_reviews(
@@ -376,7 +378,8 @@ Your output should be a concise paragraph or bullet list (no more than 4 sentenc
 
         # Create memory-based ranking if we have memory items in candidates
         if memory_items:
-            memory_items_in_candidates = [cid for cid in memory_items if cid in candidate_ids]
+            memory_items_in_candidates = [
+                cid for cid in memory_items if cid in candidate_ids]
             if memory_items_in_candidates:
                 # Memory items first, then rest (for rank fusion)
                 memory_ranking = memory_items_in_candidates + [
@@ -414,7 +417,8 @@ Your output should be a concise paragraph or bullet list (no more than 4 sentenc
 
         # Simple LLM call for merging reviews
         messages_merge = [{"role": "user", "content": merged_reviews_prompt}]
-        merged_reviews = self.llm(messages=messages_merge, temperature=0.1, max_tokens=4000)
+        merged_reviews = self.llm(
+            messages=messages_merge, temperature=0.1, max_tokens=4000)
 
         # Step 6: Make candidate item list readable (Keith's approach)
         readable_item_list_prompt = f'''
@@ -427,8 +431,10 @@ Your output should be a concise paragraph or bullet list (no more than 4 sentenc
         '''
 
         # Simple LLM call for making items readable
-        messages_readable = [{"role": "user", "content": readable_item_list_prompt}]
-        readable_item_list = self.llm(messages=messages_readable, temperature=0.1, max_tokens=4000)
+        messages_readable = [
+            {"role": "user", "content": readable_item_list_prompt}]
+        readable_item_list = self.llm(
+            messages=messages_readable, temperature=0.1, max_tokens=4000)
 
         # Step 7: Get BPR model ranking
         bpr_ranking = get_bpr_ranking(self.task['user_id'], candidate_ids)
@@ -494,9 +500,12 @@ and memory signals should be ranked especially high.
             # Combine LLM, BPR, Memory, and intrinsic quality rankings (rank fusion)
             final_ranking = cleaned
             try:
-                rank_l = {cid: i for i, cid in enumerate(cleaned)}  # LLM ranking
-                rank_b = {cid: i for i, cid in enumerate(bpr_ranking)} if bpr_ranking else {}
-                rank_m = {cid: i for i, cid in enumerate(memory_ranking)} if memory_ranking else {}
+                rank_l = {cid: i for i, cid in enumerate(
+                    cleaned)}  # LLM ranking
+                rank_b = {cid: i for i, cid in enumerate(
+                    bpr_ranking)} if bpr_ranking else {}
+                rank_m = {cid: i for i, cid in enumerate(
+                    memory_ranking)} if memory_ranking else {}
                 # Quality ranking (higher quality = better rank)
                 quality_sorted = sorted(
                     candidate_ids,
@@ -517,7 +526,8 @@ and memory signals should be ranked especially high.
                     # - Memory provides a strong secondary signal when present
                     # - BPR and intrinsic quality provide additional signals
                     if memory_ranking and bpr_ranking:
-                        score = -(0.55 * rl + 0.20 * rm + 0.15 * rb + 0.10 * rq)
+                        score = -(0.55 * rl + 0.20 * rm +
+                                  0.15 * rb + 0.10 * rq)
                     elif memory_ranking:
                         score = -(0.65 * rl + 0.25 * rm + 0.10 * rq)
                     elif bpr_ranking:
@@ -588,13 +598,11 @@ if __name__ == "__main__":
     # Run evaluation
     # If you don't set the number of tasks, the simulator will run all tasks.
     agent_outputs = simulator.run_simulation(
-        number_of_tasks=100, enable_threading=True, max_workers=10)
+        number_of_tasks=None, enable_threading=True, max_workers=10)
 
     # Evaluate the agent
     evaluation_results = simulator.evaluate()
-    with open(f'/srv/CS_245_Project/example/gemini_keith_memory_bpr_v2_evaluation_results.json', 'w') as f:
+    with open(f'/srv/CS_245_Project/example/gemini_planning_context_bpr_memory_reasoning_agent_v2_evaluation_results.json', 'w') as f:
         json.dump(evaluation_results, f, indent=4)
 
     print(f"The evaluation_results is :{evaluation_results}")
-
-

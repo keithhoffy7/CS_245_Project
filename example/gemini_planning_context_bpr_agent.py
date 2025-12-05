@@ -35,7 +35,7 @@ def load_bpr_model() -> Optional[Dict]:
     global _bpr_model_cache
     if _bpr_model_cache is not None:
         return _bpr_model_cache
-    
+
     if os.path.exists(BPR_MODEL_PATH):
         try:
             with open(BPR_MODEL_PATH, "rb") as f:
@@ -44,7 +44,7 @@ def load_bpr_model() -> Optional[Dict]:
             return _bpr_model_cache
         except Exception as e:
             logging.warning("Failed to load BPR model: %s", e)
-    
+
     logging.warning("BPR model not found. Using LLM-only ranking.")
     _bpr_model_cache = None
     return None
@@ -263,14 +263,14 @@ However, prioritize your own review history and preferences when ranking. The mo
             else:
                 print("No list found.")
                 return ['']
-            
+
             parsed = eval(result)
             if not isinstance(parsed, list):
                 print("Parsed output is not a list.")
                 return ['']
-            
+
             parsed = [str(x) for x in parsed]
-            
+
             # Filter to valid candidate_ids and preserve order
             candidate_set = set(candidate_ids)
             cleaned = []
@@ -302,7 +302,8 @@ However, prioritize your own review history and preferences when ranking. The mo
                     combined.sort(key=lambda x: x[1], reverse=True)
                     final_ranking = [cid for cid, _ in combined]
                 except Exception as e:
-                    print(f"Rank fusion failed, falling back to LLM ranking: {e}")
+                    print(
+                        f"Rank fusion failed, falling back to LLM ranking: {e}")
                     final_ranking = cleaned
 
             print('Processed Output:', final_ranking)
@@ -340,8 +341,7 @@ if __name__ == "__main__":
 
     # Evaluate the agent
     evaluation_results = simulator.evaluate()
-    with open(f'/srv/CS_245_Project/example/gemini_keith_bpr_agent_evaluation_results.json', 'w') as f:
+    with open(f'/srv/CS_245_Project/example/gemini_planning_context_bpr_agent_evaluation_results.json', 'w') as f:
         json.dump(evaluation_results, f, indent=4)
 
     print(f"The evaluation_results is :{evaluation_results}")
-
