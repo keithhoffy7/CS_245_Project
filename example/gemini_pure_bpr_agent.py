@@ -37,11 +37,6 @@ def load_bpr_model() -> Optional[Dict]:
 
 
 def get_bpr_ranking(user_id: str, candidate_ids: List[str], return_scores: bool = False):
-    """
-    Get BPR ranking for candidates.
-    returns None if model/user not available.
-    returns tuple (ranking, scores_dict) where scores_dict maps item_id -> score.
-    """
     model = load_bpr_model()
     if model is None:
         return None
@@ -95,7 +90,7 @@ def get_bpr_ranking(user_id: str, candidate_ids: List[str], return_scores: bool 
 
 class MyRecommendationAgent(RecommendationAgent):
     """
-    Pure BPR-based recommendation agent.
+    Participant's implementation of SimulationAgent
     """
 
     def __init__(self, llm: LLMBase):
@@ -103,10 +98,11 @@ class MyRecommendationAgent(RecommendationAgent):
 
     def workflow(self):
         """
-        Simulate user behavior using only the BPR model.
+        Simulate user behavior
         Returns:
-            list: Sorted list of item IDs (most preferred -> least preferred)
+            list: Sorted list of item IDs
         """
+
         candidate_ids = self.task['candidate_list']
         user_id = self.task['user_id']
 
@@ -137,24 +133,30 @@ class MyRecommendationAgent(RecommendationAgent):
 
 
 if __name__ == "__main__":
-    task_set = "amazon"
+    task_set = "amazon"  # "goodreads" or "yelp"
+    # Initialize Simulator
     simulator = Simulator(
         data_dir="/srv/output/data1/output", device="auto", cache=False)
 
+    # Load scenarios
     simulator.set_task_and_groundtruth(
-        task_dir=f"/srv/CS_245_Project/example/track2/{task_set}/tasks",
-        groundtruth_dir=f"/srv/CS_245_Project/example/track2/{task_set}/groundtruth")
+        task_dir=f"/srv/CS_245_Project/example/track2/{task_set}/tasks", groundtruth_dir=f"/srv/CS_245_Project/example/track2/{task_set}/groundtruth")
 
+    # Set your custom agent
     simulator.set_agent(MyRecommendationAgent)
 
+    # Set LLM client
     gemini_api_key = os.getenv("GEMINI_API_KEY")
     if not gemini_api_key:
         raise ValueError("GEMINI_API_KEY environment variable is not set")
     simulator.set_llm(GeminiLLM(api_key=gemini_api_key))
 
+    # Run evaluation
+    # If you don't set the number of tasks, the simulator will run all tasks.
     agent_outputs = simulator.run_simulation(
         number_of_tasks=None, enable_threading=True, max_workers=10)
 
+    # Evaluate the agent
     evaluation_results = simulator.evaluate()
     with open('/srv/CS_245_Project/example/gemini_pure_bpr_agent_evaluation_results.json', 'w') as f:
         json.dump(evaluation_results, f, indent=4)

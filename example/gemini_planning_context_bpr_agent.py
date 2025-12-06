@@ -24,14 +24,11 @@ def num_tokens_from_string(string: str) -> int:
     return a
 
 
-# ---- BPR Model loading -------------------------------------
-
 BPR_MODEL_PATH = "/srv/CS_245_Project/example/bpr_model.pkl"
 _bpr_model_cache: Optional[Dict] = None
 
 
 def load_bpr_model() -> Optional[Dict]:
-    """Lazy-load BPR model if available."""
     global _bpr_model_cache
     if _bpr_model_cache is not None:
         return _bpr_model_cache
@@ -51,10 +48,6 @@ def load_bpr_model() -> Optional[Dict]:
 
 
 def get_bpr_ranking(user_id: str, candidate_ids: List[str]) -> Optional[List[str]]:
-    """
-    Get BPR ranking for candidates.
-    Returns ranking list or None if model/user not available.
-    """
     model = load_bpr_model()
     if model is None:
         return None
@@ -82,9 +75,9 @@ def get_bpr_ranking(user_id: str, candidate_ids: List[str]) -> Optional[List[str
         return None
 
     # Compute dot-product scores between user and candidate item factors
-    u_vec = user_factors[u_idx]  # shape [k]
+    u_vec = user_factors[u_idx]
     cand_indices = np.array([idx for _, idx in existing], dtype=np.int64)
-    cand_vecs = item_factors[cand_indices]  # [num_cand, k]
+    cand_vecs = item_factors[cand_indices]
     scores = cand_vecs @ u_vec
 
     # Build ranking
@@ -101,7 +94,7 @@ def get_bpr_ranking(user_id: str, candidate_ids: List[str]) -> Optional[List[str
 
 
 class RecReasoning(ReasoningBase):
-    """Inherits from ReasoningBase - uses Keith's multi-step reasoning approach"""
+    """Inherits from ReasoningBase"""
 
     def __init__(self, profile_type_prompt, llm):
         """Initialize the reasoning module"""
@@ -126,7 +119,7 @@ class RecReasoning(ReasoningBase):
 
 class MyRecommendationAgent(RecommendationAgent):
     """
-    Combined agent: Keith's multi-step reasoning + BPR model
+    Participant's implementation of SimulationAgent
     """
 
     def __init__(self, llm: LLMBase):
@@ -135,11 +128,11 @@ class MyRecommendationAgent(RecommendationAgent):
 
     def workflow(self):
         """
-        Simulate user behavior using Keith's multi-step reasoning + BPR model
+        Simulate user behavior
         Returns:
             list: Sorted list of item IDs
         """
-        # Step 1: Get candidate item information
+
         item_list = []
         for n_bus in range(len(self.task['candidate_list'])):
             item = self.interaction_tool.get_item(
@@ -150,7 +143,7 @@ class MyRecommendationAgent(RecommendationAgent):
                              for key in keys_to_extract if key in item}
             item_list.append(filtered_item)
 
-        # Step 2: Get user's review history
+        # Get user's review history
         history_review_dict = self.interaction_tool.get_reviews(
             user_id=self.task['user_id'])
 
@@ -167,7 +160,7 @@ class MyRecommendationAgent(RecommendationAgent):
             history_review = encoding.decode(
                 encoding.encode(history_review)[:12000])
 
-        # Step 3: Get item information for reviewed items
+        # Get item information for reviewed items
         reviewed_items = []
         for review in history_review_dict:
             item_id = review.get('item_id')
@@ -179,7 +172,7 @@ class MyRecommendationAgent(RecommendationAgent):
                                  for key in keys_to_extract if key in item}
                 reviewed_items.append(filtered_item)
 
-        # Step 4: Merge reviews with item information (Keith's approach)
+        # Merge reviews with item information
         merged_reviews_prompt = f'''
         Below is a list of some amazon items and their reviews, as well as another list with some information on the items in those reviews. 
         Please merge this information into a readable and easy to understand list of text that shows each review and information about the item being reviewed.
@@ -200,7 +193,7 @@ class MyRecommendationAgent(RecommendationAgent):
 
         merged_reviews = self.reasoning(merged_reviews_prompt)
 
-        # Step 5: Make candidate item list readable (Keith's approach)
+        # Make candidate item list readable
         readable_item_list_prompt = f'''
         Below is a list of some information about certain candidate products. Please make this information into text that is readable and easy to understand.
         The information shown for each item should include the title, item id, average rating, rating number, and description in text format.
@@ -212,7 +205,7 @@ class MyRecommendationAgent(RecommendationAgent):
 
         readable_item_list = self.reasoning(readable_item_list_prompt)
 
-        # Step 6: Get BPR model ranking
+        # Get BPR model ranking
         candidate_ids = self.task['candidate_list']
         bpr_ranking = get_bpr_ranking(self.task['user_id'], candidate_ids)
         if bpr_ranking:
@@ -227,7 +220,7 @@ However, prioritize your own review history and preferences when ranking. The mo
             bpr_guidance = ""
             bpr_ranking = None
 
-        # Step 7: Final ranking task (Keith's approach + BPR guidance)
+        # Final ranking task
         task_description = f'''
         You are a real user on amazon's online shopping platform. 
         You have reviewed some products in the past on amazon's site. 
@@ -283,8 +276,7 @@ However, prioritize your own review history and preferences when ranking. The mo
                 if cid not in cleaned:
                     cleaned.append(cid)
 
-            # Combine BPR and LLM rankings (rank fusion)
-            # Use LLM as primary (it's better), BPR as light guidance
+            # Combine BPR and LLM rankings
             final_ranking = cleaned
             if bpr_ranking:
                 try:
@@ -295,8 +287,6 @@ However, prioritize your own review history and preferences when ranking. The mo
                     for cid in candidate_ids:
                         rl = rank_l.get(cid, max_rank)
                         rb = rank_b.get(cid, max_rank)
-                        # 90% LLM (Keith's approach works better), 10% BPR (light nudge)
-                        # LLM has better understanding of user preferences from reviews
                         score = -(0.85 * rl + 0.15 * rb)
                         combined.append((cid, score))
                     combined.sort(key=lambda x: x[1], reverse=True)

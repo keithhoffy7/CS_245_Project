@@ -21,10 +21,7 @@ def num_tokens_from_string(string: str) -> int:
 
 
 class RecReasoning(ReasoningBase):
-    """
-    Custom reasoning module specialized for Amazon-style recommendations.
-    Uses structured, step-by-step reasoning to analyze user preferences and rank items.
-    """
+    """Inherits from ReasoningBase"""
 
     def __init__(self, profile_type_prompt, llm, memory=None):
         """Initialize the reasoning module"""
@@ -32,10 +29,6 @@ class RecReasoning(ReasoningBase):
 
     def create_prompt(self, task_description: str, merged_reviews: str,
                       readable_item_list: str, candidate_ids: list[str]) -> str:
-        """
-        Create a structured reasoning prompt for Amazon-style product recommendations.
-        Emphasizes USER/ITEM/REVIEW analysis with step-by-step reasoning.
-        """
         prompt = '''You are a reasoning agent on an Amazon-style online shopping platform.
 Your task is to rank products for a user based on their historical preferences and product information.
 
@@ -103,9 +96,7 @@ Remember: Your output must be ONLY the ranked list, nothing else.
 
     def __call__(self, task_description: str, merged_reviews: str,
                  readable_item_list: str, candidate_ids: list[str]):
-        """
-        Execute reasoning with structured prompt.
-        """
+        """Override the parent class's __call__ method"""
         prompt = self.create_prompt(
             task_description=task_description,
             merged_reviews=merged_reviews,
@@ -125,8 +116,7 @@ Remember: Your output must be ONLY the ranked list, nothing else.
 
 class MyRecommendationAgent(RecommendationAgent):
     """
-    Agent using structured reasoning for Amazon-style recommendations.
-    Uses advanced step-by-step reasoning to analyze user preferences and rank items.
+    Participant's implementation of SimulationAgent
     """
 
     def __init__(self, llm: LLMBase):
@@ -136,11 +126,11 @@ class MyRecommendationAgent(RecommendationAgent):
 
     def workflow(self):
         """
-        Simulate user behavior using structured reasoning.
+        Simulate user behavior
         Returns:
             list: Sorted list of item IDs
         """
-        # Step 1: Get candidate item information
+        # Get candidate item information
         item_list = []
         for n_bus in range(len(self.task['candidate_list'])):
             item = self.interaction_tool.get_item(
@@ -151,7 +141,7 @@ class MyRecommendationAgent(RecommendationAgent):
                              for key in keys_to_extract if key in item}
             item_list.append(filtered_item)
 
-        # Step 2: Get user's review history
+        # Get user's review history
         history_review_dict = self.interaction_tool.get_reviews(
             user_id=self.task['user_id'])
 
@@ -168,7 +158,7 @@ class MyRecommendationAgent(RecommendationAgent):
             history_review = encoding.decode(
                 encoding.encode(history_review)[:12000])
 
-        # Step 3: Get item information for reviewed items
+        # Get item information for reviewed items
         reviewed_items = []
         for review in history_review_dict:
             item_id = review.get('item_id')
@@ -180,8 +170,7 @@ class MyRecommendationAgent(RecommendationAgent):
                                  for key in keys_to_extract if key in item}
                 reviewed_items.append(filtered_item)
 
-        # Step 4: Merge reviews with item information (Keith's approach)
-        # Use simple reasoning for this step
+        # Merge reviews with item information
         merged_reviews_prompt = f'''
         Below is a list of some amazon items and their reviews, as well as another list with some information on the items in those reviews. 
         Please merge this information into a readable and easy to understand list of text that shows each review and information about the item being reviewed.
@@ -200,12 +189,11 @@ class MyRecommendationAgent(RecommendationAgent):
         Your final output should only be this list of ratings and product information, DO NOT introduce any other text! Please number the ratings as well.
         '''
 
-        # Simple LLM call for merging reviews
         messages_merge = [{"role": "user", "content": merged_reviews_prompt}]
         merged_reviews = self.llm(
             messages=messages_merge, temperature=0.1, max_tokens=4000)
 
-        # Step 5: Make candidate item list readable
+        # Make candidate item list readable
         readable_item_list_prompt = f'''
         Below is a list of some information about certain candidate products. Please make this information into text that is readable and easy to understand.
         The information shown for each item should include the title, item id, average rating, rating number, and description in text format.
@@ -215,13 +203,12 @@ class MyRecommendationAgent(RecommendationAgent):
         Your final output should only be this list of item information, DO NOT introduce any other text! Please number the items as well.
         '''
 
-        # Simple LLM call for making items readable
         messages_readable = [
             {"role": "user", "content": readable_item_list_prompt}]
         readable_item_list = self.llm(
             messages=messages_readable, temperature=0.1, max_tokens=4000)
 
-        # Step 6: Final ranking task using structured reasoning
+        # Final ranking task
         candidate_ids = self.task['candidate_list']
         task_description = (
             "Rank the candidate products for this user based on their review history "
@@ -251,7 +238,7 @@ class MyRecommendationAgent(RecommendationAgent):
 
             parsed = [str(x) for x in parsed]
 
-            # Filter to valid candidate_ids and preserve order
+            # Filter for valid candidate_ids and preserve order
             candidate_set = set(candidate_ids)
             cleaned = []
             for cid in parsed:

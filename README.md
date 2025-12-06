@@ -109,6 +109,37 @@ simulator.set_task_and_groundtruth(task_dir=f"./track2/{task_set}/tasks", ground
 
 Also ensure that `task_set` is set to "amazon" (should be already set in all our agents).
 
+## Building the BPR Model Pickle File
+
+Some agents use a BPR (Bayesian Personalized Ranking) model for recommendations. Before running these agents, you need to train and save the BPR model as a pickle file.
+
+### Prerequisites
+
+1. Ensure you have the `implicit` library installed:
+   ```bash
+   pip install implicit
+   ```
+
+2. Make sure you have processed your review data (see Data Setup section above). The training script expects a `review.json` file.
+
+### Training the BPR Model
+
+1. Navigate to the example directory:
+   ```bash
+   cd example
+   ```
+
+2. Update the review file path in `train_bpr_recommender.py` if needed:
+   - The default path is `/srv/output/data1/output/review.json`
+   - If your review data is in a different location, update the `REVIEW_FILE` variable
+
+3. Run the training script:
+   ```bash
+   python3 train_bpr_recommender.py
+   ```
+
+4. The script will save the model to `/srv/CS_245_Project/example/bpr_model.pkl` or at any other path specified in the code. 
+
 ## Running the Agents
 
 You can run the agents by simply running the python script containing the agent. The names correspond to what advanced strategies were used for that agent (unless it is a base agent). For example, to run the Gemini Baseline Agent:

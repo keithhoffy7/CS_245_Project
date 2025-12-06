@@ -76,7 +76,7 @@ class MyRecommendationAgent(RecommendationAgent):
                 title = item.get('title') or ''
                 description = item.get('description') or ''
 
-                # Some fields may be lists or other non-string types; always cast to string
+                # Some fields may be lists or other non-string types (always cast to string)
                 if not isinstance(title, str):
                     title = str(title)
                 if not isinstance(description, str):
